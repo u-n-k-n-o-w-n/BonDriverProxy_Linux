@@ -1,0 +1,121 @@
+// これは何？
+BonDriverProxyをUnix系の環境での使用の為にpthreadで再実装した物と、Linux + PTシリーズ用のBonDriverです。
+動作はUbuntu 14.04 + PT3(ドライバ:https://github.com/m-tsudo/pt3)で確認しています。
+＃ドライバ使用の為、改変版pt1_ioctl.hをincludeしています
+主な用途としては、WindowsのTVTestからLinuxの録画サーバのチューナを使用して視聴、と言う様な感じです。
+
+また、現状Unix系の環境ではBonDriverと言うインタフェースを利用しているソフトは無いかもしれませんが、
+あって困る事は無いだろ、て事でクライアント側も入れています。
+録画ソフトや視聴ソフト側でBonDriverを扱える様にすれば、リアルタイム視聴と録画ソフトとでチャンネル変更の
+優先権を設定できるため、録画ソフト側は、このチューナが視聴に使われてた場合は…的な、面倒な資源管理を
+やらなくても良くなって嬉しいかもしれません。
+WindowsではほぼデファクトスタンダードになっているBonDriverインタフェースを提供する事で、Windows用に
+書いたコードの移植がやりやすくなるので、Unix系の環境もWindows並に充実して行けばいいなと思います。
+
+// サーバ
+tgzを展開したディレクトリで、
+---
+g++ -O2 -Wall -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
+---
+でコンパイルできます。
+Windows版でiniファイルだった物は、コマンドラインからの引数になりました。
+引数無しで実行すると例が出ます。
+
+// クライアントモジュール
+サーバ側と同じく、tgzを展開したディレクトリで、
+---
+g++ -O2 -shared -fPIC -Wall -o BonDriver_Proxy.so BonDriver_Proxy.cpp -lpthread -ldl
+---
+でコンパイルできます。
+設定ファイルは「モジュール名.conf」をモジュールと同じディレクトリに設置する形になります。
+例えばモジュールが
+/home/unknown/work/BonDriver_Proxy.so
+だったとすると、
+/home/unknown/work/BonDriver_Proxy.so.conf
+となります。
+使用方法や設定内容はWindows版BonDriverProxyと同じですが、
+行頭「;」の行はコメント行になります。
+
+// Linux + PTシリーズ用BonDriver
+tgzを展開したディレクトリで、
+---
+g++ -O2 -shared -fPIC -Wall -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -lpthread -ldl
+---
+でコンパイルできます。
+設定ファイルの名称と設置場所ルールは上記クライアントモジュールと同じで、
+行頭「;」の行がコメント行になるのも同じです。
+デバイスの数だけモジュールをコピーして使用します。
+必要な変更事項は、
+---
+#DEVICE=/dev/pt3video0
+---
+のデバイスパスをモジュール毎に被らないように変更するのと、必要であれば、
+---
+#USELNB=0
+---
+の0を1にすればLNBへの給電がオンになります…と言うか、動作確認は出来てないので、
+そうなる様につくってるつもりですと言う事で…。
+PT3が一枚刺さっている環境で、
+/home/unknown/work
+にモジュールを設置するとすると、
+// /home/unknown/workの内容
+// .soファイルはコンパイルして出来たモジュールのコピー
+// .confファイルはBonDriver_LinuxPT.confをコピーして必要箇所のみ変更
+--------------------------------------------------------------------------------
+BonDriver_LinuxPT-S0.so
+BonDriver_LinuxPT-S0.so.conf
+BonDriver_LinuxPT-S1.so
+BonDriver_LinuxPT-S1.so.conf
+BonDriver_LinuxPT-T0.so
+BonDriver_LinuxPT-T0.so.conf
+BonDriver_LinuxPT-T1.so
+BonDriver_LinuxPT-T1.so.conf
+--------------------------------------------------------------------------------
+.confファイルの#DEVICE=行はそれぞれ、
+// BonDriver_LinuxPT-S0.so.conf
+---
+#DEVICE=/dev/pt3video0
+---
+// BonDriver_LinuxPT-S1.so.conf
+---
+#DEVICE=/dev/pt3video1
+---
+// BonDriver_LinuxPT-T0.so.conf
+---
+#DEVICE=/dev/pt3video2
+---
+// BonDriver_LinuxPT-T1.so.conf
+---
+#DEVICE=/dev/pt3video3
+---
+となります。
+それらより下は、説明がめんどくさいのでスルーです。
+あんまりいじる必要は無いんじゃないかと思います。
+詳しい方は、UHF(地デジ)に関しては、自分の地域の放送局の物理チャンネルを調べて不要箇所を削除すれば、
+チャンネルスキャンの時間をだいぶ減らせるかと思います。
+＃不要箇所削除の際は、残した物のBonDriverとしてのチャンネル番号を0からの連番に採番しなおしてください
+なお、もし編集する際は文字コードはUTF-8を使用してください。
+
+ライセンス等はWindows版に準じますので、そちらのReadMe.txtを確認してくださいね。
+
+Jun/18/2014 unknown <unknown_@live.jp>
+
+// 更新履歴
+version 1.1.2.1 (Jun/21/2014)
+	・アプリ側で環境依存を気にしないでSIGALRM使えるようにusleep()をnanosleep()に変更
+	・BonDriver使用のサンプルプログラム追加
+	  コンパイル方法や使用方法はソース(sample.cpp)参照
+
+version 1.1.2.0 (Jun/19/2014)
+	・SetChannel()内で、GetTsStream()でアプリに返したバッファを解放してしまうBonDriverを読み込んだ場合、
+	  タイミングが悪いと解放後メモリにアクセスしてしまう可能性があったのに対応
+	・BonDriver_Proxy.cpp自身もプロキシ対象のBonDriverからのレスポンスをサーバから受け取ってからではあるものの
+	  上記の状態だったので、アプリに返したバッファは必須の時以外解放しないように修正
+	・BonDriver_Proxy.cppのPurgeTsStream()でのロック処理漏れを修正
+	・コマンドパケット/TSパケットのキューがオーバーフローした際にその旨を表示するようにした
+	・デフォルトのキューサイズを大きくした(なおキューのサイズはプロセスに使用を許可するメモリ量の制限値的な
+	  意味なので、大きくしておいてもその量が必要時以外に確保されるわけではない)
+	・その他ロジックは(ほぼ)変更無しでのソースコード整形
+
+version 1.1.1.0 (Jun/18/2014)
+	・初版リリース
