@@ -228,6 +228,7 @@ public:
 	static cCriticalSection m_sInstanceLock;
 	static cBonDriverLinuxPT *m_spThis;
 	static BOOL m_sbInit;
+	static BOOL m_sbPT;
 
 	cBonDriverLinuxPT();
 	virtual ~cBonDriverLinuxPT();

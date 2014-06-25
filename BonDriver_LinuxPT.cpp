@@ -2,6 +2,7 @@
 $ g++ -O2 -shared -fPIC -Wall -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -lpthread -ldl
 */
 #include "BonDriver_LinuxPT.h"
+#include "plex.cpp"
 
 static char g_strSpace[32];
 static stChannel g_stChannels[2][MAX_CH];
@@ -69,9 +70,20 @@ static int Init()
 				p++;
 			strncpy(g_Device, p, sizeof(g_Device) - 1);
 			g_Device[sizeof(g_Device) - 1] = '\0';
-			p = strstr(g_Device, "video");
-			if (p)
+			if ((p = strstr(g_Device, "video")) != NULL)	// PT
 				g_Type = (atoi(p + 5) / 2) % 2;
+			else
+			{
+				if((p = strstr(g_Device, "asv5220")) != NULL)	// PX-W3PE
+					g_Type = (atoi(p + 7) / 2) % 2;
+				else if((p = strstr(g_Device, "pxq3pe")) != NULL)	// PX-Q3PE
+					g_Type = (atoi(p + 6) / 2) % 2;
+				else if((p = strstr(g_Device, "pxw3u3")) != NULL)	// PX-W3U3
+					g_Type = atoi(p + 6) % 2;
+				else if((p = strstr(g_Device, "pxs3u")) != NULL)	// PX-S3U / PX-S3U2
+					g_Type = atoi(p + 5) % 2;
+				cBonDriverLinuxPT::m_sbPT = FALSE;
+			}
 			if (g_Type == 0)
 				p = (char *)"BS/CS110";
 			else
@@ -200,6 +212,7 @@ static float GetSignalLevel_T(int signal)
 cBonDriverLinuxPT *cBonDriverLinuxPT::m_spThis = NULL;
 cCriticalSection cBonDriverLinuxPT::m_sInstanceLock;
 BOOL cBonDriverLinuxPT::m_sbInit = TRUE;
+BOOL cBonDriverLinuxPT::m_sbPT = TRUE;
 
 extern "C" IBonDriver *CreateBonDriver()
 {
@@ -261,6 +274,8 @@ const BOOL cBonDriverLinuxPT::OpenTuner(void)
 	m_fd = ::open(g_Device, O_RDONLY);
 	if (m_fd < 0)
 		return FALSE;
+	if (m_sbPT == FALSE)
+		::InitPlexTuner(m_fd);
 	if (g_UseLNB && (g_Type == 0) && (::ioctl(m_fd, LNB_ENABLE, 2) < 0))
 		::fprintf(stderr, "LNB ON failed: %s\n", g_Device);
 	m_bTuner = TRUE;
