@@ -25,8 +25,12 @@ static int Init()
 	if (fp == NULL)
 		return -1;
 
-	BOOL bAddress, bPort, bBonDriver, bChannelLock, bPacketFifoSize, bTsFifoSize, bTsPacketBufSize;
-	bAddress = bPort = bBonDriver = bChannelLock = bPacketFifoSize = bTsFifoSize = bTsPacketBufSize = FALSE;
+	BOOL bHost, bPort, bBonDriver, bChannelLock, bConnectTimeOut, bUseMagicPacket;
+	BOOL bTargetHost, bTargetPort, bTargetMac;
+	BOOL bPacketFifoSize, bTsFifoSize, bTsPacketBufSize;
+	bHost = bPort = bBonDriver = bChannelLock = bConnectTimeOut = bUseMagicPacket = FALSE;
+	bTargetHost = bTargetPort = bTargetMac = FALSE;
+	bPacketFifoSize = bTsFifoSize = bTsPacketBufSize = FALSE;
 	while (fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
@@ -34,14 +38,14 @@ static int Init()
 		p = buf + strlen(buf) - 1;
 		while (*p == '\r' || *p == '\n')
 			*p-- = '\0';
-		if (!bAddress && (strncmp(buf, "ADDRESS=", 8) == 0))
+		if (!bHost && (strncmp(buf, "ADDRESS=", 8) == 0))
 		{
 			p = &buf[8];
 			while (*p == ' ' || *p == '\t')
 				p++;
 			strncpy(g_Host, p, sizeof(g_Host) - 1);
 			g_Host[sizeof(g_Host) - 1] = '\0';
-			bAddress = TRUE;
+			bHost = TRUE;
 		}
 		else if (!bPort && (strncmp(buf, "PORT=", 5) == 0))
 		{
@@ -67,6 +71,69 @@ static int Init()
 				p++;
 			g_ChannelLock = atoi(p);
 			bChannelLock = TRUE;
+		}
+		else if (!bConnectTimeOut && (strncmp(buf, "CONNECT_TIMEOUT=", 16) == 0))
+		{
+			p = &buf[16];
+			while (*p == ' ' || *p == '\t')
+				p++;
+			g_ConnectTimeOut = atoi(p);
+			bConnectTimeOut = TRUE;
+		}
+		else if (!bUseMagicPacket && (strncmp(buf, "USE_MAGICPACKET=", 16) == 0))
+		{
+			p = &buf[16];
+			while (*p == ' ' || *p == '\t')
+				p++;
+			g_UseMagicPacket = atoi(p);
+			bUseMagicPacket = TRUE;
+		}
+		else if (!bTargetHost && (strncmp(buf, "TARGET_ADDRESS=", 15) == 0))
+		{
+			p = &buf[15];
+			while (*p == ' ' || *p == '\t')
+				p++;
+			strncpy(g_TargetHost, p, sizeof(g_TargetHost) - 1);
+			g_TargetHost[sizeof(g_TargetHost) - 1] = '\0';
+			bTargetHost = TRUE;
+		}
+		else if (!bTargetPort && (strncmp(buf, "TARGET_PORT=", 12) == 0))
+		{
+			p = &buf[12];
+			while (*p == ' ' || *p == '\t')
+				p++;
+			g_TargetPort = atoi(p);
+			bTargetPort = TRUE;
+		}
+		else if (!bTargetMac && (strncmp(buf, "TARGET_MACADDRESS=", 18) == 0))
+		{
+			p = &buf[18];
+			while (*p == ' ' || *p == '\t')
+				p++;
+			char mac[32];
+			memset(mac, 0, sizeof(mac));
+			strncpy(mac, p, sizeof(mac) - 1);
+			BOOL bErr = FALSE;
+			for (int i = 0; i < 6 && !bErr; i++)
+			{
+				BYTE b = 0;
+				p = &mac[i * 3];
+				for (int j = 0; j < 2 && !bErr; j++)
+				{
+					if ('0' <= *p && *p <= '9')
+						b = b * 0x10 + (*p - '0');
+					else if ('A' <= *p && *p <= 'F')
+						b = b * 0x10 + (*p - 'A' + 10);
+					else if ('a' <= *p && *p <= 'f')
+						b = b * 0x10 + (*p - 'a' + 10);
+					else
+						bErr = TRUE;
+					p++;
+				}
+				g_TargetMac[i] = b;
+			}
+			if (!bErr)
+				bTargetMac = TRUE;
 		}
 		else if (!bPacketFifoSize && (strncmp(buf, "PACKET_FIFO_SIZE=", 17) == 0))
 		{
@@ -95,8 +162,18 @@ static int Init()
 	}
 	fclose(fp);
 
-	if (!bAddress || !bPort || !bBonDriver)
+	if (!bHost || !bPort || !bBonDriver)
 		return -2;
+
+	if (g_UseMagicPacket)
+	{
+		if (!bTargetMac)
+			return -3;
+		if (!bTargetHost)
+			strcpy(g_TargetHost, g_Host);
+		if (!bTargetPort)
+			g_TargetPort = g_Port;
+	}
 
 	return 0;
 }
@@ -814,6 +891,44 @@ static SOCKET Connect(char *host, unsigned short port)
 	fd_set wd;
 	timeval tv;
 
+	if (g_UseMagicPacket)
+	{
+		char sendbuf[128];
+		memset(sendbuf, 0xff, 6);
+		for (i = 1; i <= 16; i++)
+			memcpy(&sendbuf[i * 6], g_TargetMac, 6);
+
+		sock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (sock == INVALID_SOCKET)
+			return INVALID_SOCKET;
+
+		BOOL opt = TRUE;
+		if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt)) != 0)
+		{
+			close(sock);
+			return INVALID_SOCKET;
+		}
+
+		memset((char *)&server, 0, sizeof(server));
+		server.sin_family = AF_INET;
+		server.sin_addr.s_addr = inet_addr(g_TargetHost);
+		if (server.sin_addr.s_addr == INADDR_NONE)
+		{
+			he = gethostbyname(g_TargetHost);
+			if (he == NULL)
+			{
+				close(sock);
+				return INVALID_SOCKET;
+			}
+			memcpy(&(server.sin_addr), *(he->h_addr_list), he->h_length);
+		}
+		server.sin_port = htons(g_TargetPort);
+		int ret = sendto(sock, sendbuf, 102, 0, (sockaddr *)&server, sizeof(server));
+		close(sock);
+		if (ret != 102)
+			return INVALID_SOCKET;
+	}
+
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock == INVALID_SOCKET)
 		return INVALID_SOCKET;
@@ -833,7 +948,7 @@ static SOCKET Connect(char *host, unsigned short port)
 	server.sin_port = htons(port);
 	bf = TRUE;
 	ioctl(sock, FIONBIO, &bf);
-	tv.tv_sec = 5;
+	tv.tv_sec = g_ConnectTimeOut;
 	tv.tv_usec = 0;
 	FD_ZERO(&wd);
 	FD_SET(sock, &wd);

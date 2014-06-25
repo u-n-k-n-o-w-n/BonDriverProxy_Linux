@@ -101,6 +101,14 @@ BonDriver_LinuxPT-T1.so.conf
 Jun/18/2014 unknown <unknown_@live.jp>
 
 // 更新履歴
+version 1.1.3.0 (Jun/25/2014)
+	・クライアント側にサーバへの接続タイムアウトの指定を出来る機能を追加
+	  ＃confのCONNECT_TIMEOUTで指定(単位は秒)
+	・ついでにWOLのパケット自動送信機能を追加
+	  ＃使い方に難しい点は無いと思うのでBonDriver_Proxy.conf参照。TARGET_MACADDRESSは必須だが、TARGET_ADDRESS及び
+	  ＃TARGET_PORT行に関しては、無い場合はADDRESSとPORTをそれぞれ使用する。
+	  ＃なお、TARGET_PORTはUDPのポートである事に注意。
+
 version 1.1.2.1 (Jun/21/2014)
 	・アプリ側で環境依存を気にしないでSIGALRM使えるようにusleep()をnanosleep()に変更
 	・BonDriver使用のサンプルプログラム追加

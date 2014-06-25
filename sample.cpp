@@ -1,10 +1,11 @@
 /*
-$ g++ -O2 -Wall -o sample sample.cpp -ldl
+$ g++ -O2 -Wall -rdynamic -o sample sample.cpp -ldl
 */
 #define FILE_OFFSET_BITS	64
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -91,6 +92,7 @@ int main(int argc, char *argv[])
 	// インスタンス作成
 	IBonDriver *pIBon;
 	IBonDriver2 *pIBon2;
+	pIBon = pIBon2 = NULL;
 	char *err;
 	IBonDriver *(*f)() = (IBonDriver *(*)())dlsym(hModule, "CreateBonDriver");
 	if ((err = dlerror()) == NULL)
@@ -129,7 +131,8 @@ int main(int argc, char *argv[])
 	pIBon2->SetChannel(dwSpace, dwChannel);
 
 	// 終了タイマー & 停止シグナル用ハンドラ登録
-	struct sigaction sa = {0};
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = handler,
 	sa.sa_flags = SA_RESTART,
 	sigemptyset(&sa.sa_mask);
@@ -199,6 +202,7 @@ int main(int argc, char *argv[])
 	}
 
 err:
+	close(wfd);
 	// インスタンス解放 & モジュールリリース
 	pIBon->Release();
 	dlclose(hModule);
