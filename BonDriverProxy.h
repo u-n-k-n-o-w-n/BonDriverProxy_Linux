@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -226,7 +227,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "Packet Queue OVERFLOW : size[%lu]\n", size());
+			fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
 			// TSの場合のみドロップ
 			if (p->IsTS())
 			{
@@ -273,6 +274,7 @@ class cProxyServer {
 	BOOL m_bTunerOpen;
 	DWORD m_tRet;
 	pthread_t m_hTsRead;
+	std::list<cProxyServer *> *m_pTsReceiversList;
 	BOOL * volatile m_pStopTsRead;
 	cCriticalSection *m_pTsLock;
 	DWORD *m_ppos;

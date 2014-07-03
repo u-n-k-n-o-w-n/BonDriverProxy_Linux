@@ -30,10 +30,10 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 	m_strBonDriver[0] = '\0';
 	m_bTunerOpen = FALSE;
 	m_hTsRead = 0;
+	m_pTsReceiversList = NULL;
 	m_pStopTsRead = NULL;
 	m_pTsLock = NULL;
 	m_ppos = NULL;
-	m_bChannelLock = FALSE;
 
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -44,6 +44,21 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 
 cProxyServer::~cProxyServer()
 {
+	if (m_hTsRead)
+	{
+		LOCK(*m_pTsLock);
+		std::list<cProxyServer *>::iterator it = m_pTsReceiversList->begin();
+		while (it != m_pTsReceiversList->end())
+		{
+			if (*it == this)
+			{
+				m_pTsReceiversList->erase(it);
+				break;
+			}
+			++it;
+		}
+	}
+
 	{
 		BOOL bRelease = TRUE;
 		LOCK(Lock_Instance);
@@ -65,6 +80,7 @@ cProxyServer::~cProxyServer()
 			{
 				*m_pStopTsRead = TRUE;
 				::pthread_join(m_hTsRead, NULL);
+				delete m_pTsReceiversList;
 				delete m_pStopTsRead;
 				delete m_pTsLock;
 				delete m_ppos;
@@ -104,7 +120,6 @@ DWORD cProxyServer::Process()
 		return 2;
 	}
 
-	LPVOID ppv[4];
 	cEvent *h[2] = { &m_Error, m_fifoRecv.GetEventHandle() };
 	while (1)
 	{
@@ -254,7 +269,7 @@ DWORD cProxyServer::Process()
 				}
 				if (!bFind)
 				{
-					if (m_pTsLock != NULL)
+					if (m_hTsRead)
 					{
 						LOCK(*m_pTsLock);
 						CloseTuner();
@@ -267,7 +282,7 @@ DWORD cProxyServer::Process()
 
 			case ePurgeTsStream:
 			{
-				if (m_bChannelLock && (m_pTsLock != NULL))
+				if (m_hTsRead && m_bChannelLock)
 				{
 					LOCK(*m_pTsLock);
 					PurgeTsStream();
@@ -336,7 +351,6 @@ DWORD cProxyServer::Process()
 				{
 					m_bChannelLock = pPh->m_pPacket->payload[sizeof(DWORD) * 2];
 					BOOL bLocked = FALSE;
-					if (!m_bChannelLock)
 					{
 						LOCK(Lock_Instance);
 						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
@@ -346,60 +360,84 @@ DWORD cProxyServer::Process()
 							if ((m_pIBon != NULL) && (m_pIBon == (*it)->m_pIBon))
 							{
 								if ((*it)->m_bChannelLock)
-								{
 									bLocked = TRUE;
-									break;
+								if ((m_hTsRead == 0) && ((*it)->m_hTsRead != 0))
+								{
+									m_hTsRead = (*it)->m_hTsRead;
+									m_pTsReceiversList = (*it)->m_pTsReceiversList;
+									m_pStopTsRead = (*it)->m_pStopTsRead;
+									m_pTsLock = (*it)->m_pTsLock;
+									m_ppos = (*it)->m_ppos;
+									m_pTsLock->Enter();
+									m_pTsReceiversList->push_back(this);
+									m_pTsLock->Leave();
 								}
 							}
 						}
 					}
-					if (bLocked)
+					if (bLocked && !m_bChannelLock)
 						makePacket(eSetChannel2, (DWORD)0x01);
 					else
 					{
 						DWORD *pdw1 = (DWORD *)(pPh->m_pPacket->payload);
 						DWORD *pdw2 = (DWORD *)(&(pPh->m_pPacket->payload[sizeof(DWORD)]));
-						if (m_pTsLock != NULL)
+						if (m_hTsRead)
 							m_pTsLock->Enter();
 						BOOL b = SetChannel(ntohl(*pdw1), ntohl(*pdw2));
-						if (m_pTsLock != NULL)
+						if (m_hTsRead)
 							m_pTsLock->Leave();
 						if (b)
 						{
 							makePacket(eSetChannel2, (DWORD)0x00);
 							if (m_hTsRead == 0)
 							{
+								// すぐ上で検索してるのになぜ再度検索するのかと言うと、同じBonDriverを要求している複数の
+								// クライアントから、ほぼ同時のタイミングで最初のeSetChannel2をリクエストされた場合の為
+								// eSetChannel2全体をまとめてロックすれば必要無くなるが、BonDriver_Proxyがロードされ、
+								// それが自分自身に接続してきた場合デッドロックする事になるので分けている
 								BOOL bFind = FALSE;
 								LOCK(Lock_Instance);
 								for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 								{
 									if (*it == this)
 										continue;
-									if ((m_pIBon != NULL) && (m_pIBon == (*it)->m_pIBon))
+									if (m_pIBon == (*it)->m_pIBon)
 									{
 										if ((*it)->m_hTsRead != 0)
 										{
 											bFind = TRUE;
 											m_hTsRead = (*it)->m_hTsRead;
+											m_pTsReceiversList = (*it)->m_pTsReceiversList;
 											m_pStopTsRead = (*it)->m_pStopTsRead;
 											m_pTsLock = (*it)->m_pTsLock;
 											m_ppos = (*it)->m_ppos;
+											m_pTsLock->Enter();
+											m_pTsReceiversList->push_back(this);
+											m_pTsLock->Leave();
 											break;
 										}
 									}
 								}
 								if (!bFind)
 								{
+									m_pTsReceiversList = new std::list<cProxyServer *>();
+									m_pTsReceiversList->push_back(this);
 									m_pStopTsRead = new BOOL(FALSE);
 									m_pTsLock = new cCriticalSection();
 									m_ppos = new DWORD(0);
+									LPVOID *ppv = new LPVOID[5];
 									ppv[0] = m_pIBon;
-									ppv[1] = m_pStopTsRead;
-									ppv[2] = m_pTsLock;
-									ppv[3] = m_ppos;
+									ppv[1] = m_pTsReceiversList;
+									ppv[2] = m_pStopTsRead;
+									ppv[3] = m_pTsLock;
+									ppv[4] = m_ppos;
 									if (::pthread_create(&m_hTsRead, NULL, cProxyServer::TsReader, ppv))
 									{
 										m_hTsRead = 0;
+										delete[] ppv;
+										m_pTsReceiversList->clear();
+										delete m_pTsReceiversList;
+										m_pTsReceiversList = NULL;
 										delete m_pStopTsRead;
 										m_pStopTsRead = NULL;
 										delete m_pTsLock;
@@ -657,9 +695,11 @@ void *cProxyServer::TsReader(LPVOID pv)
 {
 	LPVOID *ppv = static_cast<LPVOID *>(pv);
 	IBonDriver *pIBon = static_cast<IBonDriver *>(ppv[0]);
-	volatile BOOL &StopTsRead = *(static_cast<BOOL *>(ppv[1]));
-	cCriticalSection &TsLock = *(static_cast<cCriticalSection *>(ppv[2]));
-	DWORD &pos = *(static_cast<DWORD *>(ppv[3]));
+	std::list<cProxyServer *> &TsReceiversList = *(static_cast<std::list<cProxyServer *> *>(ppv[1]));
+	volatile BOOL &StopTsRead = *(static_cast<BOOL *>(ppv[2]));
+	cCriticalSection &TsLock = *(static_cast<cCriticalSection *>(ppv[3]));
+	DWORD &pos = *(static_cast<DWORD *>(ppv[4]));
+	delete[] ppv;
 	DWORD dwSize, dwRemain, now, before = 0;
 	float fSignalLevel = 0;
 	const DWORD TsPacketBufSize = g_TsPacketBufSize;
@@ -691,14 +731,8 @@ void *cProxyServer::TsReader(LPVOID pv)
 					pos += dwSize;
 					if (dwRemain == 0)
 					{
-						{
-							LOCK(Lock_Instance);
-							for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
-							{
-								if (pIBon == (*it)->m_pIBon)
-									(*it)->makePacket(eGetTsStream, pTsBuf, pos, fSignalLevel);
-							}
-						}
+						for (std::list<cProxyServer *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
+							(*it)->makePacket(eGetTsStream, pTsBuf, pos, fSignalLevel);
 						pos = 0;
 					}
 				}
@@ -706,36 +740,23 @@ void *cProxyServer::TsReader(LPVOID pv)
 				{
 					DWORD left, dwLen = TsPacketBufSize - pos;
 					::memcpy(&pTsBuf[pos], pBuf, dwLen);
+					for (std::list<cProxyServer *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
+						(*it)->makePacket(eGetTsStream, pTsBuf, TsPacketBufSize, fSignalLevel);
+					left = dwSize - dwLen;
+					pBuf += dwLen;
+					while (left > TsPacketBufSize)
 					{
-						LOCK(Lock_Instance);
-						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
-						{
-							if (pIBon == (*it)->m_pIBon)
-								(*it)->makePacket(eGetTsStream, pTsBuf, TsPacketBufSize, fSignalLevel);
-						}
-						left = dwSize - dwLen;
-						pBuf += dwLen;
-						while (left > TsPacketBufSize)
-						{
-							for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
-							{
-								if (pIBon == (*it)->m_pIBon)
-									(*it)->makePacket(eGetTsStream, pBuf, TsPacketBufSize, fSignalLevel);
-							}
-							left -= TsPacketBufSize;
-							pBuf += TsPacketBufSize;
-						}
+						for (std::list<cProxyServer *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
+							(*it)->makePacket(eGetTsStream, pBuf, TsPacketBufSize, fSignalLevel);
+						left -= TsPacketBufSize;
+						pBuf += TsPacketBufSize;
 					}
 					if (left != 0)
 					{
 						if (dwRemain == 0)
 						{
-							LOCK(Lock_Instance);
-							for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
-							{
-								if (pIBon == (*it)->m_pIBon)
-									(*it)->makePacket(eGetTsStream, pBuf, left, fSignalLevel);
-							}
+							for (std::list<cProxyServer *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
+								(*it)->makePacket(eGetTsStream, pBuf, left, fSignalLevel);
 							left = 0;
 						}
 						else
@@ -924,6 +945,16 @@ int main(int argc, char *argv[])
 	{
 		perror("daemon");
 		return -1;
+	}
+
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);
+	if (sigaction(SIGPIPE, &sa, NULL))
+	{
+		perror("sigaction");
+		return -2;
 	}
 
 	int ret = Listen(g_Host, g_Port);

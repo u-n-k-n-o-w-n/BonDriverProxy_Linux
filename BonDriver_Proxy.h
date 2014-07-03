@@ -257,7 +257,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "Packet Queue OVERFLOW : size[%lu]\n", size());
+			fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
 			// TSの場合のみドロップ
 			if (p->IsTS())
 			{
@@ -331,13 +331,13 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "TS Queue OVERFLOW : size[%lu]\n", size());
+			fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
 			TS_DATA *pDel = front();
 			pop();
 			delete pDel;
 		}
 		push(p);
-		m_Event.Set();
+//		m_Event.Set();
 	}
 
 	void Pop(TS_DATA **p)
@@ -347,11 +347,11 @@ public:
 		{
 			*p = front();
 			pop();
-			if (empty())
-				m_Event.Reset();
+//			if (empty())
+//				m_Event.Reset();
 		}
-		else
-			m_Event.Reset();
+//		else
+//			m_Event.Reset();
 	}
 
 	cEvent *GetEventHandle()
@@ -367,6 +367,28 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+enum enumbRes {
+	ebResSelectBonDriver = 0,
+	ebResCreateBonDriver,
+	ebResOpenTuner,
+	ebResPurgeTsStream,
+	ebResSetLnbPower,
+	ebResNum,
+};
+
+enum enumdwRes {
+	edwResSetChannel2 = 0,
+	edwResGetTotalDeviceNum,
+	edwResGetActiveDeviceNum,
+	edwResNum,
+};
+
+enum enumpRes {
+	epResEnumTuningSpace = 0,
+	epResEnumChannelName,
+	epResNum,
+};
+
 class cProxyClient : public IBonDriver3 {
 	SOCKET m_s;
 	pthread_t m_hThread;
@@ -380,11 +402,14 @@ class cProxyClient : public IBonDriver3 {
 	cPacketFifo m_fifoRecv;
 	cTSFifo m_fifoTS;
 	TS_DATA *m_LastBuff;
-	BOOL m_bRes;
-	DWORD m_dwRes;
+	cEvent *m_bResEvent[ebResNum];
+	BOOL m_bRes[ebResNum];
+	cEvent *m_dwResEvent[edwResNum];
+	DWORD m_dwRes[edwResNum];
+	cEvent *m_pResEvent[epResNum];
+	TCHAR *m_pRes[epResNum];
 	DWORD m_dwBufPos;
 	TCHAR *m_pBuf[8];
-	TCHAR *m_pRes;
 	float m_fSignalLevel;
 	DWORD m_dwSpace;
 	DWORD m_dwChannel;

@@ -133,8 +133,8 @@ int main(int argc, char *argv[])
 	// 終了タイマー & 停止シグナル用ハンドラ登録
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
-	sa.sa_handler = handler,
-	sa.sa_flags = SA_RESTART,
+	sa.sa_handler = handler;
+	sa.sa_flags = SA_RESTART;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);

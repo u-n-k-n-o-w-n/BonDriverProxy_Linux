@@ -163,13 +163,13 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "TS Queue OVERFLOW : size[%lu]\n", size());
+			fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
 			TS_DATA *pDel = front();
 			pop();
 			delete pDel;
 		}
 		push(p);
-		m_Event.Set();
+//		m_Event.Set();
 	}
 
 	void Pop(TS_DATA **p)
@@ -179,11 +179,11 @@ public:
 		{
 			*p = front();
 			pop();
-			if (empty())
-				m_Event.Reset();
+//			if (empty())
+//				m_Event.Reset();
 		}
-		else
-			m_Event.Reset();
+//		else
+//			m_Event.Reset();
 	}
 
 	cEvent *GetEventHandle()
