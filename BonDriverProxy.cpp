@@ -3,6 +3,8 @@ $ g++ -O2 -Wall -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
 */
 #include "BonDriverProxy.h"
 
+#define STRICT_LOCK
+
 static std::list<cProxyServer *> InstanceList;
 static cCriticalSection Lock_Instance;
 
@@ -44,39 +46,53 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 
 cProxyServer::~cProxyServer()
 {
-	if (m_hTsRead)
+	LOCK(Lock_Instance);
+	BOOL bRelease = TRUE;
+	std::list<cProxyServer *>::iterator it = InstanceList.begin();
+	while (it != InstanceList.end())
 	{
-		LOCK(*m_pTsLock);
-		std::list<cProxyServer *>::iterator it = m_pTsReceiversList->begin();
-		while (it != m_pTsReceiversList->end())
+		if (*it == this)
+			InstanceList.erase(it++);
+		else
 		{
-			if (*it == this)
-			{
-				m_pTsReceiversList->erase(it);
-				break;
-			}
+			if ((m_hModule != NULL) && (m_hModule == (*it)->m_hModule))
+				bRelease = FALSE;
 			++it;
 		}
 	}
-
+	if (bRelease)
 	{
-		BOOL bRelease = TRUE;
-		LOCK(Lock_Instance);
-		std::list<cProxyServer *>::iterator it = InstanceList.begin();
-		while (it != InstanceList.end())
+		if (m_hTsRead)
 		{
-			if (*it == this)
-				InstanceList.erase(it++);
-			else
+			*m_pStopTsRead = TRUE;
+			::pthread_join(m_hTsRead, NULL);
+			delete m_pTsReceiversList;
+			delete m_pStopTsRead;
+			delete m_pTsLock;
+			delete m_ppos;
+		}
+		if (m_pIBon)
+			m_pIBon->Release();
+		if (m_hModule)
+			::dlclose(m_hModule);
+	}
+	else
+	{
+		if (m_hTsRead)
+		{
+			LOCK(*m_pTsLock);
+			it = m_pTsReceiversList->begin();
+			while (it != m_pTsReceiversList->end())
 			{
-				if ((m_hModule != NULL) && (m_hModule == (*it)->m_hModule))
-					bRelease = FALSE;
+				if (*it == this)
+				{
+					m_pTsReceiversList->erase(it);
+					break;
+				}
 				++it;
 			}
-		}
-		if (bRelease)
-		{
-			if (m_hTsRead)
+			// 可能性は低いがゼロではない…
+			if (m_pTsReceiversList->empty())
 			{
 				*m_pStopTsRead = TRUE;
 				::pthread_join(m_hTsRead, NULL);
@@ -85,10 +101,6 @@ cProxyServer::~cProxyServer()
 				delete m_pTsLock;
 				delete m_ppos;
 			}
-			if (m_pIBon)
-				m_pIBon->Release();
-			if (m_hModule)
-				::dlclose(m_hModule);
 		}
 	}
 
@@ -131,6 +143,9 @@ DWORD cProxyServer::Process()
 
 		case WAIT_OBJECT_0 + 1:
 		{
+#ifdef STRICT_LOCK
+			LOCK(Lock_Instance);
+#endif
 			cPacketHolder *pPh = NULL;
 			m_fifoRecv.Pop(&pPh);
 			switch (pPh->GetCommand())
@@ -142,7 +157,9 @@ DWORD cProxyServer::Process()
 				else
 				{
 					BOOL bFind = FALSE;
+#ifndef STRICT_LOCK
 					LOCK(Lock_Instance);
+#endif
 					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 					{
 						if (::strcmp((LPCSTR)(pPh->m_pPacket->payload), (*it)->m_strBonDriver) == 0)
@@ -183,7 +200,9 @@ DWORD cProxyServer::Process()
 				{
 					BOOL bFind = FALSE;
 					{
+#ifndef STRICT_LOCK
 						LOCK(Lock_Instance);
+#endif
 						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 						{
 							if (*it == this)
@@ -199,6 +218,11 @@ DWORD cProxyServer::Process()
 									break;
 								}
 								// ここに来るのは上より更にレアケース、あるいはクライアントが
+								// BonDriver_Proxyを要求し、サーバ側のBonDriver_Proxyも
+								// 同じサーバに対して自分自身を要求する無限ループ状態だけのハズ
+								// なお、STRICT_LOCKが定義してある場合は、そもそもデッドロックを
+								// 起こすので、後者の状況は発生しない
+								// 無限ループ状態に関しては放置
 								// 無限ループ状態以外の場合は一応リストの最後まで検索してみて、
 								// それでも見つからなかったらCreateBonDriver()をやらせてみる
 							}
@@ -226,7 +250,9 @@ DWORD cProxyServer::Process()
 			{
 				BOOL bFind = FALSE;
 				{
+#ifndef STRICT_LOCK
 					LOCK(Lock_Instance);
+#endif
 					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 					{
 						if (*it == this)
@@ -252,7 +278,9 @@ DWORD cProxyServer::Process()
 			{
 				BOOL bFind = FALSE;
 				{
+#ifndef STRICT_LOCK
 					LOCK(Lock_Instance);
+#endif
 					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 					{
 						if (*it == this)
@@ -352,7 +380,9 @@ DWORD cProxyServer::Process()
 					m_bChannelLock = pPh->m_pPacket->payload[sizeof(DWORD) * 2];
 					BOOL bLocked = FALSE;
 					{
+#ifndef STRICT_LOCK
 						LOCK(Lock_Instance);
+#endif
 						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
 						{
 							if (*it == this)
@@ -391,10 +421,17 @@ DWORD cProxyServer::Process()
 							makePacket(eSetChannel2, (DWORD)0x00);
 							if (m_hTsRead == 0)
 							{
+#ifndef STRICT_LOCK
 								// すぐ上で検索してるのになぜ再度検索するのかと言うと、同じBonDriverを要求している複数の
 								// クライアントから、ほぼ同時のタイミングで最初のeSetChannel2をリクエストされた場合の為
 								// eSetChannel2全体をまとめてロックすれば必要無くなるが、BonDriver_Proxyがロードされ、
-								// それが自分自身に接続してきた場合デッドロックする事になるので分けている
+								// それが自分自身に接続してきた場合デッドロックする事になる
+								// なお、同様の理由でeCreateBonDriver, eOpenTuner, eCloseTunerのロックは実は不完全
+								// しかし、自分自身への再帰接続を行わないならば完全なロックも可能
+								// 実際の所、テスト用途以外で自分自身への再接続が必要になる状況と言うのはまず無いと
+								// 思うので、STRICT_LOCKが定義してある場合は完全なロックを行う事にする
+								// ただしそのかわりに、BonDriver_Proxyをロードし、そこからのプロキシチェーンのどこかで
+								// 自分自身に再帰接続した場合はデッドロックとなるので注意
 								BOOL bFind = FALSE;
 								LOCK(Lock_Instance);
 								for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
@@ -420,6 +457,7 @@ DWORD cProxyServer::Process()
 								}
 								if (!bFind)
 								{
+#endif
 									m_pTsReceiversList = new std::list<cProxyServer *>();
 									m_pTsReceiversList->push_back(this);
 									m_pStopTsRead = new BOOL(FALSE);
@@ -435,7 +473,6 @@ DWORD cProxyServer::Process()
 									{
 										m_hTsRead = 0;
 										delete[] ppv;
-										m_pTsReceiversList->clear();
 										delete m_pTsReceiversList;
 										m_pTsReceiversList = NULL;
 										delete m_pStopTsRead;
@@ -446,7 +483,9 @@ DWORD cProxyServer::Process()
 										m_ppos = NULL;
 										m_Error.Set();
 									}
+#ifndef STRICT_LOCK
 								}
+#endif
 							}
 							else
 							{

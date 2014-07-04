@@ -851,8 +851,8 @@ const BOOL cProxyClient::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
 	if (!m_bTuner)
 		return FALSE;
-	if ((m_dwSpace == dwSpace) && (m_dwChannel == dwChannel))
-		return TRUE;
+//	if ((m_dwSpace == dwSpace) && (m_dwChannel == dwChannel))
+//		return TRUE;
 	makePacket(eSetChannel2, dwSpace, dwChannel, g_ChannelLock);
 	m_dwResEvent[edwResSetChannel2]->Wait();
 	DWORD dw;
