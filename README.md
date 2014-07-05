@@ -15,7 +15,7 @@ WindowsではほぼデファクトスタンダードになっているBonDriver�
 ソースディレクトリで、
 
 ```sh
-g++ -O2 -Wall -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
+make server
 ```
 
 でコンパイルできます。
@@ -27,7 +27,7 @@ Windows版でiniファイルだった物は、コマンドラインからの引�
 サーバ側と同じく、ソースディレクトリで、
 
 ```sh
-g++ -O2 -shared -fPIC -Wall -o BonDriver_Proxy.so BonDriver_Proxy.cpp -lpthread -ldl
+make client
 ```
 
 でコンパイルできます。
@@ -52,7 +52,7 @@ g++ -O2 -shared -fPIC -Wall -o BonDriver_Proxy.so BonDriver_Proxy.cpp -lpthread 
 ソースディレクトリで、
 
 ```sh
-g++ -O2 -shared -fPIC -Wall -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -lpthread -ldl
+make driver
 ```
 
 でコンパイルできます。
