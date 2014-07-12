@@ -15,7 +15,7 @@ $ g++ -O2 -Wall -rdynamic -o sample sample.cpp -ldl
 #include "typedef.h"
 #include "IBonDriver2.h"
 
-volatile BOOL bStop = FALSE;
+static volatile BOOL bStop = FALSE;
 static void handler(int sig)
 {
 	bStop = TRUE;
@@ -68,6 +68,14 @@ int main(int argc, char *argv[])
 	if (!bfind || !sfind || !cfind)
 		usage(argv[0]);
 
+	// モジュールロード
+	void *hModule = dlopen(bon, RTLD_LAZY);
+	if (!hModule)
+	{
+		fprintf(stderr, "dlopen error: %s\n", dlerror());
+		return -1;
+	}
+
 	// 出力先指定無しなら標準出力へ
 	if (!ofind)
 		wfd = 1;
@@ -77,16 +85,9 @@ int main(int argc, char *argv[])
 		if (wfd < 0)
 		{
 			perror("open");
-			return -1;
+			dlclose(hModule);
+			return -2;
 		}
-	}
-
-	// モジュールロード
-	void *hModule = dlopen(bon, RTLD_LAZY);
-	if (!hModule)
-	{
-		perror("dlopen");
-		return -2;
 	}
 
 	// インスタンス作成
