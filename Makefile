@@ -23,7 +23,7 @@ client: BonDriver_Proxy.$(EXT)
 driver: BonDriver_LinuxPT.$(EXT)
 
 BonDriverProxy: BonDriverProxy.o
-	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
 
 BonDriver_Proxy.$(EXT): BonDriver_Proxy.$(EXT).o
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)

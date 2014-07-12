@@ -1,5 +1,5 @@
 /*
-$ g++ -O2 -Wall -rdynamic -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
+$ g++ -O2 -Wall -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
 */
 #include "BonDriverProxy.h"
 
