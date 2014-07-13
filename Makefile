@@ -2,9 +2,9 @@
 
 SRCDIR = .
 CXX = g++
-CXXFLAGS = -Wall -O2
+CXXFLAGS = -Wall -O2 -pthread
 LDFLAGS =
-LIBS = -lpthread -ldl
+LIBS = -ldl
 SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp
 
 UNAME := $(shell uname)
@@ -23,7 +23,7 @@ client: BonDriver_Proxy.$(EXT)
 driver: BonDriver_LinuxPT.$(EXT)
 
 BonDriverProxy: BonDriverProxy.o
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
 
 BonDriver_Proxy.$(EXT): BonDriver_Proxy.$(EXT).o
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
