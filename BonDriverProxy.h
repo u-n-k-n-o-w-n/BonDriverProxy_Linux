@@ -1,5 +1,12 @@
 #ifndef __BONDRIVERPROXY_H__
 #define __BONDRIVERPROXY_H__
+
+// Shut up warning
+//   warning: 'daemon' is deprecated: first deprecated in OS X 10.5
+#if __APPLE__
+#define daemon fake_daemon
+#endif
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +22,13 @@
 #include <queue>
 #include "typedef.h"
 #include "IBonDriver3.h"
+
+#if __APPLE__
+#undef daemon
+extern "C" {
+    extern int daemon(int, int);
+}
+#endif
 
 namespace BonDriverProxy {
 
