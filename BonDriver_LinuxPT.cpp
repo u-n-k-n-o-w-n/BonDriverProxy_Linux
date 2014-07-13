@@ -1,8 +1,10 @@
 /*
-$ g++ -O2 -shared -fPIC -Wall -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -lpthread -ldl
+$ g++ -O2 -Wall -pthread -shared -fPIC -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -ldl
 */
 #include "BonDriver_LinuxPT.h"
 #include "plex.cpp"
+
+namespace BonDriver_LinuxPT {
 
 static char g_strSpace[32];
 static stChannel g_stChannels[2][MAX_CH];
@@ -12,14 +14,14 @@ static BOOL g_UseLNB;
 
 static int Convert(char *src, char *dst, size_t dstsize)
 {
-	iconv_t d = iconv_open("UTF-16LE", "UTF-8");
+	iconv_t d = ::iconv_open("UTF-16LE", "UTF-8");
 	if (d == (iconv_t)-1)
 		return -1;
-	size_t srclen = strlen(src) + 1;
+	size_t srclen = ::strlen(src) + 1;
 	size_t dstlen = dstsize - 2;
-	size_t ret = iconv(d, &src, &srclen, &dst, &dstlen);
+	size_t ret = ::iconv(d, &src, &srclen, &dst, &dstlen);
 	*dst = *(dst + 1) = '\0';
-	iconv_close(d);
+	::iconv_close(d);
 	if (ret == (size_t)-1)
 		return -2;
 	return 0;
@@ -31,16 +33,16 @@ static int Init()
 	char *p, buf[512];
 
 	Dl_info info;
-	if (dladdr((void *)Init, &info) != 0)
+	if (::dladdr((void *)Init, &info) != 0)
 	{
-		strncpy(buf, info.dli_fname, sizeof(buf) - 8);
+		::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
 		buf[sizeof(buf) - 8] = '\0';
-		strcat(buf, ".conf");
+		::strcat(buf, ".conf");
 	}
 	else
-		strcpy(buf, DEFAULT_CONF_NAME);
+		::strcpy(buf, DEFAULT_CONF_NAME);
 
-	fp = fopen(buf, "r");
+	fp = ::fopen(buf, "r");
 	if (fp == NULL)
 		return -1;
 	for (int i = 0; i < MAX_CH; i++)
@@ -52,36 +54,36 @@ static int Init()
 	int idx = 0;
 	BOOL bdFlag = FALSE;
 	BOOL blFlag = FALSE;
-	while (fgets(buf, sizeof(buf), fp))
+	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
 			continue;
-		p = buf + strlen(buf) - 1;
+		p = buf + ::strlen(buf) - 1;
 		while (*p == '\r' || *p == '\n')
 			*p-- = '\0';
-		if ((idx != 0) && (strncmp(buf, "#ISDB_S", 7) == 0))
+		if ((idx != 0) && (::strncmp(buf, "#ISDB_S", 7) == 0))
 			idx = 0;
-		else if ((idx != 1) && (strncmp(buf, "#ISDB_T", 7) == 0))
+		else if ((idx != 1) && (::strncmp(buf, "#ISDB_T", 7) == 0))
 			idx = 1;
-		else if (!bdFlag && (strncmp(buf, "#DEVICE=", 8) == 0))
+		else if (!bdFlag && (::strncmp(buf, "#DEVICE=", 8) == 0))
 		{
 			p = &buf[8];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			strncpy(g_Device, p, sizeof(g_Device) - 1);
+			::strncpy(g_Device, p, sizeof(g_Device) - 1);
 			g_Device[sizeof(g_Device) - 1] = '\0';
-			if ((p = strstr(g_Device, "video")) != NULL)	// PT
-				g_Type = (atoi(p + 5) / 2) % 2;
+			if ((p = ::strstr(g_Device, "video")) != NULL)	// PT
+				g_Type = (::atoi(p + 5) / 2) % 2;
 			else
 			{
-				if((p = strstr(g_Device, "asv5220")) != NULL)	// PX-W3PE
-					g_Type = (atoi(p + 7) / 2) % 2;
-				else if((p = strstr(g_Device, "pxq3pe")) != NULL)	// PX-Q3PE
-					g_Type = (atoi(p + 6) / 2) % 2;
-				else if((p = strstr(g_Device, "pxw3u3")) != NULL)	// PX-W3U3
-					g_Type = atoi(p + 6) % 2;
-				else if((p = strstr(g_Device, "pxs3u")) != NULL)	// PX-S3U / PX-S3U2
-					g_Type = atoi(p + 5) % 2;
+				if((p = ::strstr(g_Device, "asv5220")) != NULL)	// PX-W3PE
+					g_Type = (::atoi(p + 7) / 2) % 2;
+				else if((p = ::strstr(g_Device, "pxq3pe")) != NULL)	// PX-Q3PE
+					g_Type = (::atoi(p + 6) / 2) % 2;
+				else if((p = ::strstr(g_Device, "pxw3u3")) != NULL)	// PX-W3U3
+					g_Type = ::atoi(p + 6) % 2;
+				else if((p = ::strstr(g_Device, "pxs3u")) != NULL)	// PX-S3U / PX-S3U2
+					g_Type = ::atoi(p + 5) % 2;
 				cBonDriverLinuxPT::m_sbPT = FALSE;
 			}
 			if (g_Type == 0)
@@ -90,17 +92,17 @@ static int Init()
 				p = (char *)"UHF";
 			if (Convert(p, g_strSpace, sizeof(g_strSpace)) < 0)
 			{
-				fclose(fp);
+				::fclose(fp);
 				return -2;
 			}
 			bdFlag = TRUE;
 		}
-		else if (!blFlag && (strncmp(buf, "#USELNB=", 8) == 0))
+		else if (!blFlag && (::strncmp(buf, "#USELNB=", 8) == 0))
 		{
 			p = &buf[8];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_UseLNB = atoi(p);
+			g_UseLNB = ::atoi(p);
 			blFlag = TRUE;
 		}
 		else
@@ -111,7 +113,7 @@ static int Init()
 			p = cp[n++] = buf;
 			while (1)
 			{
-				p = strchr(p, '\t');
+				p = ::strchr(p, '\t');
 				if (p)
 				{
 					*p++ = '\0';
@@ -127,22 +129,22 @@ static int Init()
 			}
 			if (bOk)
 			{
-				DWORD dw = atoi(cp[1]);
+				DWORD dw = ::atoi(cp[1]);
 				if (dw < MAX_CH)
 				{
 					if (Convert(cp[0], g_stChannels[idx][dw].strChName, MAX_CN_LEN) < 0)
 					{
-						fclose(fp);
+						::fclose(fp);
 						return -3;
 					}
-					g_stChannels[idx][dw].freq.frequencyno = atoi(cp[2]);
-					g_stChannels[idx][dw].freq.slot = atoi(cp[3]);
+					g_stChannels[idx][dw].freq.frequencyno = ::atoi(cp[2]);
+					g_stChannels[idx][dw].freq.slot = ::atoi(cp[3]);
 					g_stChannels[idx][dw].bUnused = FALSE;
 				}
 			}
 		}
 	}
-	fclose(fp);
+	::fclose(fp);
 	return 0;
 }
 
@@ -205,7 +207,7 @@ static float GetSignalLevel_S(int signal)
 
 static float GetSignalLevel_T(int signal)
 {
-	double P = log10(5505024 / (double)signal) * 10;
+	double P = ::log10(5505024 / (double)signal) * 10;
 	return (float)((0.000024 * P * P * P * P) - (0.0016 * P * P * P) + (0.0398 * P * P) + (0.5491 * P) + 3.0965);
 }
 
@@ -234,7 +236,7 @@ extern "C" IBonDriver *CreateBonDriver()
 cBonDriverLinuxPT::cBonDriverLinuxPT() : m_fifoTS(m_c, m_m)
 {
 	m_spThis = this;
-	::Convert((char *)TUNER_NAME, m_TunerName, sizeof(m_TunerName));
+	Convert((char *)TUNER_NAME, m_TunerName, sizeof(m_TunerName));
 	m_LastBuff = NULL;
 	m_bTuner = FALSE;
 	m_fSignalLevel = 0;
@@ -275,7 +277,7 @@ const BOOL cBonDriverLinuxPT::OpenTuner(void)
 	if (m_fd < 0)
 		return FALSE;
 	if (m_sbPT == FALSE)
-		::InitPlexTuner(m_fd);
+		PLEX::InitPlexTuner(m_fd);
 	if (g_UseLNB && (g_Type == 0) && (::ioctl(m_fd, LNB_ENABLE, 2) < 0))
 		::fprintf(stderr, "LNB ON failed: %s\n", g_Device);
 	m_bTuner = TRUE;
@@ -498,9 +500,9 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 			else
 			{
 				if (g_Type == 0)
-					f = ::GetSignalLevel_S(signal);
+					f = GetSignalLevel_S(signal);
 				else
-					f = ::GetSignalLevel_T(signal);
+					f = GetSignalLevel_T(signal);
 			}
 			pLinuxPT->m_fSignalLevel = f;
 			before = now;
@@ -527,4 +529,6 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 	}
 	delete[] pTsBuf;
 	return &ret;
+}
+
 }

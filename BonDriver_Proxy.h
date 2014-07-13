@@ -16,6 +16,8 @@
 #include "typedef.h"
 #include "IBonDriver3.h"
 
+namespace BonDriver_Proxy {
+
 #define DEFAULT_CONF_NAME	"BonDriver_Proxy.conf"
 #define TUNER_NAME			"BonDriver_Proxy"
 
@@ -257,7 +259,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
+			::fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
 			// TSの場合のみドロップ
 			if (p->IsTS())
 			{
@@ -331,7 +333,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
+			::fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
 			TS_DATA *pDel = front();
 			pop();
 			delete pDel;
@@ -471,4 +473,6 @@ public:
 	const DWORD GetActiveDeviceNum(void);
 	const BOOL SetLnbPower(const BOOL bEnable);
 };
+
+}
 #endif	// __BONDRIVER_PROXY_H__

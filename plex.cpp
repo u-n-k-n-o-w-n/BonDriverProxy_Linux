@@ -1,6 +1,8 @@
 #ifndef _PLEX_CPP_
 #define _PLEX_CPP_
 
+namespace PLEX {
+
 static const DWORD LookupTable1[256] = {
 	0x63636363, 0x7c7c7c7c, 0x77777777, 0x7b7b7b7b,
 	0xf2f2f2f2, 0x6b6b6b6b, 0x6f6f6f6f, 0xc5c5c5c5,
@@ -106,7 +108,7 @@ static void GetKey(BYTE *Key, BYTE *Seed, BYTE *Rand)
 		for (i = 0; i < 4; i++)
 			dwTemp[i] = dwTemp[i + 4];
 	}
-	memcpy(Key, dwTemp, 16);
+	::memcpy(Key, dwTemp, 16);
 	return;
 }
 
@@ -128,11 +130,11 @@ static int InitPlexTuner(int fd)
 	BYTE Seed[16] = {0xf0, 0xf1, 0x33, 0x84, 0xa1, 0x1d, 0x46, 0x25, 0x95, 0x1a, 0xce, 0x09, 0xdd, 0x86, 0x78, 0xa4};
 	FUNC_0x83_ARG arg;
 
-	if (ioctl(fd, PLEX_FUNC_0x81, buf))
+	if (::ioctl(fd, PLEX_FUNC_0x81, buf))
 		return 0;
 	if (buf[0] != 0)
 	{
-		if (ioctl(fd, PLEX_FUNC_0x82, Rand))
+		if (::ioctl(fd, PLEX_FUNC_0x82, Rand))
 			return 0;
 		GetKey(Key, Seed, Rand);
 		arg.bp1 = Key;
@@ -142,6 +144,8 @@ static int InitPlexTuner(int fd)
 	arg.b1 = 16;
 	arg.bp2 = Data;
 	arg.b2 = 16;
-	return ioctl(fd, PLEX_FUNC_0x83, &arg);
+	return ::ioctl(fd, PLEX_FUNC_0x83, &arg);
+}
+
 }
 #endif	// _PLEX_CPP_

@@ -16,6 +16,8 @@
 #include "typedef.h"
 #include "IBonDriver3.h"
 
+namespace BonDriverProxy {
+
 #define WAIT_TIME	10	// GetTsStream()の後で、dwRemainが0だった場合に待つ時間(ms)
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -227,7 +229,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
+			::fprintf(stderr, "Packet Queue OVERFLOW : size[%zu]\n", size());
 			// TSの場合のみドロップ
 			if (p->IsTS())
 			{
@@ -316,4 +318,6 @@ public:
 	void setSocket(SOCKET s){ m_s = s; }
 	static void *Reception(LPVOID pv);
 };
+
+}
 #endif	// __BONDRIVERPROXY_H__

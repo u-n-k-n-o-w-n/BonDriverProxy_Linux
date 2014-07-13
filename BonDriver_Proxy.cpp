@@ -1,7 +1,9 @@
 /*
-$ g++ -O2 -shared -fPIC -Wall -o BonDriver_Proxy.so BonDriver_Proxy.cpp -lpthread -ldl
+$ g++ -O2 -Wall -pthread -shared -fPIC -o BonDriver_Proxy.so BonDriver_Proxy.cpp -ldl
 */
 #include "BonDriver_Proxy.h"
+
+namespace BonDriver_Proxy {
 
 static std::list<cProxyClient *> InstanceList;
 static cCriticalSection Lock_Global;
@@ -12,16 +14,16 @@ static int Init()
 	char *p, buf[512];
 
 	Dl_info info;
-	if (dladdr((void *)Init, &info) != 0)
+	if (::dladdr((void *)Init, &info) != 0)
 	{
-		strncpy(buf, info.dli_fname, sizeof(buf) - 8);
+		::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
 		buf[sizeof(buf) - 8] = '\0';
-		strcat(buf, ".conf");
+		::strcat(buf, ".conf");
 	}
 	else
-		strcpy(buf, DEFAULT_CONF_NAME);
+		::strcpy(buf, DEFAULT_CONF_NAME);
 
-	fp = fopen(buf, "r");
+	fp = ::fopen(buf, "r");
 	if (fp == NULL)
 		return -1;
 
@@ -31,88 +33,88 @@ static int Init()
 	bHost = bPort = bBonDriver = bChannelLock = bConnectTimeOut = bUseMagicPacket = FALSE;
 	bTargetHost = bTargetPort = bTargetMac = FALSE;
 	bPacketFifoSize = bTsFifoSize = bTsPacketBufSize = FALSE;
-	while (fgets(buf, sizeof(buf), fp))
+	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
 			continue;
-		p = buf + strlen(buf) - 1;
+		p = buf + ::strlen(buf) - 1;
 		while (*p == '\r' || *p == '\n')
 			*p-- = '\0';
-		if (!bHost && (strncmp(buf, "ADDRESS=", 8) == 0))
+		if (!bHost && (::strncmp(buf, "ADDRESS=", 8) == 0))
 		{
 			p = &buf[8];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			strncpy(g_Host, p, sizeof(g_Host) - 1);
+			::strncpy(g_Host, p, sizeof(g_Host) - 1);
 			g_Host[sizeof(g_Host) - 1] = '\0';
 			bHost = TRUE;
 		}
-		else if (!bPort && (strncmp(buf, "PORT=", 5) == 0))
+		else if (!bPort && (::strncmp(buf, "PORT=", 5) == 0))
 		{
 			p = &buf[5];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_Port = atoi(p);
+			g_Port = ::atoi(p);
 			bPort = TRUE;
 		}
-		else if (!bBonDriver && (strncmp(buf, "BONDRIVER=", 10) == 0))
+		else if (!bBonDriver && (::strncmp(buf, "BONDRIVER=", 10) == 0))
 		{
 			p = &buf[10];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			strncpy(g_BonDriver, p, sizeof(g_BonDriver) - 1);
+			::strncpy(g_BonDriver, p, sizeof(g_BonDriver) - 1);
 			g_BonDriver[sizeof(g_BonDriver) - 1] = '\0';
 			bBonDriver = TRUE;
 		}
-		else if (!bChannelLock && (strncmp(buf, "CHANNEL_LOCK=", 13) == 0))
+		else if (!bChannelLock && (::strncmp(buf, "CHANNEL_LOCK=", 13) == 0))
 		{
 			p = &buf[13];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_ChannelLock = atoi(p);
+			g_ChannelLock = ::atoi(p);
 			bChannelLock = TRUE;
 		}
-		else if (!bConnectTimeOut && (strncmp(buf, "CONNECT_TIMEOUT=", 16) == 0))
+		else if (!bConnectTimeOut && (::strncmp(buf, "CONNECT_TIMEOUT=", 16) == 0))
 		{
 			p = &buf[16];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_ConnectTimeOut = atoi(p);
+			g_ConnectTimeOut = ::atoi(p);
 			bConnectTimeOut = TRUE;
 		}
-		else if (!bUseMagicPacket && (strncmp(buf, "USE_MAGICPACKET=", 16) == 0))
+		else if (!bUseMagicPacket && (::strncmp(buf, "USE_MAGICPACKET=", 16) == 0))
 		{
 			p = &buf[16];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_UseMagicPacket = atoi(p);
+			g_UseMagicPacket = ::atoi(p);
 			bUseMagicPacket = TRUE;
 		}
-		else if (!bTargetHost && (strncmp(buf, "TARGET_ADDRESS=", 15) == 0))
+		else if (!bTargetHost && (::strncmp(buf, "TARGET_ADDRESS=", 15) == 0))
 		{
 			p = &buf[15];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			strncpy(g_TargetHost, p, sizeof(g_TargetHost) - 1);
+			::strncpy(g_TargetHost, p, sizeof(g_TargetHost) - 1);
 			g_TargetHost[sizeof(g_TargetHost) - 1] = '\0';
 			bTargetHost = TRUE;
 		}
-		else if (!bTargetPort && (strncmp(buf, "TARGET_PORT=", 12) == 0))
+		else if (!bTargetPort && (::strncmp(buf, "TARGET_PORT=", 12) == 0))
 		{
 			p = &buf[12];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_TargetPort = atoi(p);
+			g_TargetPort = ::atoi(p);
 			bTargetPort = TRUE;
 		}
-		else if (!bTargetMac && (strncmp(buf, "TARGET_MACADDRESS=", 18) == 0))
+		else if (!bTargetMac && (::strncmp(buf, "TARGET_MACADDRESS=", 18) == 0))
 		{
 			p = &buf[18];
 			while (*p == ' ' || *p == '\t')
 				p++;
 			char mac[32];
-			memset(mac, 0, sizeof(mac));
-			strncpy(mac, p, sizeof(mac) - 1);
+			::memset(mac, 0, sizeof(mac));
+			::strncpy(mac, p, sizeof(mac) - 1);
 			BOOL bErr = FALSE;
 			for (int i = 0; i < 6 && !bErr; i++)
 			{
@@ -135,32 +137,32 @@ static int Init()
 			if (!bErr)
 				bTargetMac = TRUE;
 		}
-		else if (!bPacketFifoSize && (strncmp(buf, "PACKET_FIFO_SIZE=", 17) == 0))
+		else if (!bPacketFifoSize && (::strncmp(buf, "PACKET_FIFO_SIZE=", 17) == 0))
 		{
 			p = &buf[17];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_PacketFifoSize = atoi(p);
+			g_PacketFifoSize = ::atoi(p);
 			bPacketFifoSize = TRUE;
 		}
-		else if (!bTsFifoSize && (strncmp(buf, "TS_FIFO_SIZE=", 13) == 0))
+		else if (!bTsFifoSize && (::strncmp(buf, "TS_FIFO_SIZE=", 13) == 0))
 		{
 			p = &buf[13];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_TsFifoSize = atoi(p);
+			g_TsFifoSize = ::atoi(p);
 			bTsFifoSize = TRUE;
 		}
-		else if (!bTsPacketBufSize && (strncmp(buf, "TSPACKET_BUFSIZE=", 17) == 0))
+		else if (!bTsPacketBufSize && (::strncmp(buf, "TSPACKET_BUFSIZE=", 17) == 0))
 		{
 			p = &buf[17];
 			while (*p == ' ' || *p == '\t')
 				p++;
-			g_TsPacketBufSize = atoi(p);
+			g_TsPacketBufSize = ::atoi(p);
 			bTsPacketBufSize = TRUE;
 		}
 	}
-	fclose(fp);
+	::fclose(fp);
 
 	if (!bHost || !bPort || !bBonDriver)
 		return -2;
@@ -170,7 +172,7 @@ static int Init()
 		if (!bTargetMac)
 			return -3;
 		if (!bTargetHost)
-			strcpy(g_TargetHost, g_Host);
+			::strcpy(g_TargetHost, g_Host);
 		if (!bTargetPort)
 			g_TargetPort = g_Port;
 	}
@@ -938,77 +940,77 @@ static SOCKET Connect(char *host, unsigned short port)
 	if (g_UseMagicPacket)
 	{
 		char sendbuf[128];
-		memset(sendbuf, 0xff, 6);
+		::memset(sendbuf, 0xff, 6);
 		for (i = 1; i <= 16; i++)
-			memcpy(&sendbuf[i * 6], g_TargetMac, 6);
+			::memcpy(&sendbuf[i * 6], g_TargetMac, 6);
 
-		sock = socket(AF_INET, SOCK_DGRAM, 0);
+		sock = ::socket(AF_INET, SOCK_DGRAM, 0);
 		if (sock == INVALID_SOCKET)
 			return INVALID_SOCKET;
 
 		BOOL opt = TRUE;
-		if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt)) != 0)
+		if (::setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt)) != 0)
 		{
-			close(sock);
+			::close(sock);
 			return INVALID_SOCKET;
 		}
 
-		memset((char *)&server, 0, sizeof(server));
+		::memset((char *)&server, 0, sizeof(server));
 		server.sin_family = AF_INET;
-		server.sin_addr.s_addr = inet_addr(g_TargetHost);
+		server.sin_addr.s_addr = ::inet_addr(g_TargetHost);
 		if (server.sin_addr.s_addr == INADDR_NONE)
 		{
-			he = gethostbyname(g_TargetHost);
+			he = ::gethostbyname(g_TargetHost);
 			if (he == NULL)
 			{
-				close(sock);
+				::close(sock);
 				return INVALID_SOCKET;
 			}
-			memcpy(&(server.sin_addr), *(he->h_addr_list), he->h_length);
+			::memcpy(&(server.sin_addr), *(he->h_addr_list), he->h_length);
 		}
 		server.sin_port = htons(g_TargetPort);
-		int ret = sendto(sock, sendbuf, 102, 0, (sockaddr *)&server, sizeof(server));
-		close(sock);
+		int ret = ::sendto(sock, sendbuf, 102, 0, (sockaddr *)&server, sizeof(server));
+		::close(sock);
 		if (ret != 102)
 			return INVALID_SOCKET;
 	}
 
-	sock = socket(AF_INET, SOCK_STREAM, 0);
+	sock = ::socket(AF_INET, SOCK_STREAM, 0);
 	if (sock == INVALID_SOCKET)
 		return INVALID_SOCKET;
-	memset((char *)&server, 0, sizeof(server));
+	::memset((char *)&server, 0, sizeof(server));
 	server.sin_family = AF_INET;
-	server.sin_addr.s_addr = inet_addr(host);
+	server.sin_addr.s_addr = ::inet_addr(host);
 	if (server.sin_addr.s_addr == INADDR_NONE)
 	{
-		he = gethostbyname(host);
+		he = ::gethostbyname(host);
 		if (he == NULL)
 		{
-			close(sock);
+			::close(sock);
 			return INVALID_SOCKET;
 		}
-		memcpy(&(server.sin_addr), *(he->h_addr_list), he->h_length);
+		::memcpy(&(server.sin_addr), *(he->h_addr_list), he->h_length);
 	}
 	server.sin_port = htons(port);
 	bf = TRUE;
-	ioctl(sock, FIONBIO, &bf);
+	::ioctl(sock, FIONBIO, &bf);
 	tv.tv_sec = g_ConnectTimeOut;
 	tv.tv_usec = 0;
 	FD_ZERO(&wd);
 	FD_SET(sock, &wd);
-	connect(sock, (sockaddr *)&server, sizeof(server));
-	if ((i = select((int)(sock + 1), 0, &wd, 0, &tv)) == SOCKET_ERROR)
+	::connect(sock, (sockaddr *)&server, sizeof(server));
+	if ((i = ::select((int)(sock + 1), 0, &wd, 0, &tv)) == SOCKET_ERROR)
 	{
-		close(sock);
+		::close(sock);
 		return INVALID_SOCKET;
 	}
 	if (i == 0)
 	{
-		close(sock);
+		::close(sock);
 		return INVALID_SOCKET;
 	}
 	bf = FALSE;
-	ioctl(sock, FIONBIO, &bf);
+	::ioctl(sock, FIONBIO, &bf);
 	return sock;
 }
 
@@ -1050,8 +1052,10 @@ err:
 extern "C" BOOL SetBonDriver(LPCSTR p)
 {
 	LOCK(Lock_Global);
-	if (strlen(p) >= sizeof(g_BonDriver))
+	if (::strlen(p) >= sizeof(g_BonDriver))
 		return FALSE;
-	strcpy(g_BonDriver, p);
+	::strcpy(g_BonDriver, p);
 	return TRUE;
+}
+
 }

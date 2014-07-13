@@ -18,6 +18,8 @@
 #include "IBonDriver2.h"
 #include "pt1_ioctl.h"
 
+namespace BonDriver_LinuxPT {
+
 #define DEFAULT_CONF_NAME	"BonDriver_LinuxPT.conf"
 
 #define MAX_CH				128
@@ -163,7 +165,7 @@ public:
 		LOCK(m_Lock);
 		if (size() >= m_fifoSize)
 		{
-			fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
+			::fprintf(stderr, "TS Queue OVERFLOW : size[%zu]\n", size());
 			TS_DATA *pDel = front();
 			pop();
 			delete pDel;
@@ -254,4 +256,6 @@ public:
 	const DWORD GetCurSpace(void);
 	const DWORD GetCurChannel(void);
 };
+
+}
 #endif	// _BONDRIVER_LINUXPT_H_

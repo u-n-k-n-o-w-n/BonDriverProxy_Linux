@@ -1,7 +1,9 @@
 /*
-$ g++ -O2 -Wall -o BonDriverProxy BonDriverProxy.cpp -lpthread -ldl
+$ g++ -O2 -Wall -pthread -rdynamic -o BonDriverProxy BonDriverProxy.cpp -ldl
 */
 #include "BonDriverProxy.h"
+
+namespace BonDriverProxy {
 
 #define STRICT_LOCK
 
@@ -12,14 +14,14 @@ static int Init(int ac, char *av[])
 {
 	if (ac < 3)
 		return -1;
-	strncpy(g_Host, av[1], sizeof(g_Host) - 1);
+	::strncpy(g_Host, av[1], sizeof(g_Host) - 1);
 	g_Host[sizeof(g_Host) - 1] = '\0';
-	g_Port = atoi(av[2]);
+	g_Port = ::atoi(av[2]);
 	if (ac > 3)
 	{
-		g_PacketFifoSize = atoi(av[3]);
+		g_PacketFifoSize = ::atoi(av[3]);
 		if (ac > 4)
-			g_TsPacketBufSize = atoi(av[4]);
+			g_TsPacketBufSize = ::atoi(av[4]);
 	}
 	return 0;
 }
@@ -836,7 +838,7 @@ IBonDriver *cProxyServer::CreateBonDriver()
 			}
 		}
 		else
-			fprintf(stderr, "CreateBonDriver(): %s\n", err);
+			::fprintf(stderr, "CreateBonDriver(): %s\n", err);
 	}
 	return m_pIBon;
 }
@@ -916,41 +918,41 @@ static int Listen(char *host, unsigned short port)
 	SOCKET lsock, csock;
 	socklen_t len;
 
-	lsock = socket(AF_INET, SOCK_STREAM, 0);
+	lsock = ::socket(AF_INET, SOCK_STREAM, 0);
 	if (lsock == INVALID_SOCKET)
 		return 1;
 
 	BOOL reuse = TRUE;
-	setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
-	memset((char *)&address, 0, sizeof(address));
+	::setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
+	::memset((char *)&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = inet_addr(host);
+	address.sin_addr.s_addr = ::inet_addr(host);
 	if (address.sin_addr.s_addr == INADDR_NONE)
 	{
-		he = gethostbyname(host);
+		he = ::gethostbyname(host);
 		if (he == NULL)
 		{
-			close(lsock);
+			::close(lsock);
 			return 2;
 		}
-		memcpy(&(address.sin_addr), *(he->h_addr_list), he->h_length);
+		::memcpy(&(address.sin_addr), *(he->h_addr_list), he->h_length);
 	}
 	address.sin_port = htons(port);
-	if (bind(lsock, (sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
+	if (::bind(lsock, (sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
 	{
-		close(lsock);
+		::close(lsock);
 		return 3;
 	}
-	if (listen(lsock, 4) == SOCKET_ERROR)
+	if (::listen(lsock, 4) == SOCKET_ERROR)
 	{
-		close(lsock);
+		::close(lsock);
 		return 4;
 	}
 
 	while (1)
 	{
 		len = sizeof(address);
-		csock = accept(lsock, (sockaddr *)&address, &len);
+		csock = ::accept(lsock, (sockaddr *)&address, &len);
 		if (csock == INVALID_SOCKET)
 			continue;
 
@@ -972,9 +974,11 @@ static int Listen(char *host, unsigned short port)
 	return 0;	// ここには来ない
 }
 
+}
+
 int main(int argc, char *argv[])
 {
-	if (Init(argc, argv) != 0)
+	if (BonDriverProxy::Init(argc, argv) != 0)
 	{
 		fprintf(stderr, "usage: %s address port (packet_fifo_size tspacket_bufsize)\ne.g. $ %s 192.168.0.100 1192\n", argv[0],argv[0]);
 		return 0;
@@ -996,7 +1000,7 @@ int main(int argc, char *argv[])
 		return -2;
 	}
 
-	int ret = Listen(g_Host, g_Port);
+	int ret = BonDriverProxy::Listen(BonDriverProxy::g_Host, BonDriverProxy::g_Port);
 
 	return ret;
 }
