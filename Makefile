@@ -1,20 +1,21 @@
 .PHONY: all clean distclean dep depend
 
 SRCDIR = .
-CXX = g++
-CXXFLAGS = -Wall -O2 -pthread
 LDFLAGS =
 LIBS = -ldl
 SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp
 
 UNAME := $(shell uname)
-ifeq ($(UNAME), Linux)
-	SOFLAGS = -shared
-	EXT = so
-endif
 ifeq ($(UNAME), Darwin)
+	CXX = clang++
+	CXXFLAGS = -Wall -O2
 	SOFLAGS = -dynamiclib
 	EXT = dylib
+else
+	CXX = g++
+	CXXFLAGS = -Wall -O2 -pthread
+	SOFLAGS = -shared
+	EXT = so
 endif
 
 all: server client driver
@@ -36,9 +37,17 @@ else
 endif
 
 %.$(EXT).o: %.cpp .depend
+ifeq ($(UNAME), Darwin)
+	$(CXX) $(CXXFLAGS) -pthread -fPIC -c -o $@ $<
+else
 	$(CXX) $(CXXFLAGS) -fPIC -c -o $@ $<
+endif
 %.o: %.cpp .depend
+ifeq ($(UNAME), Darwin)
+	$(CXX) $(CXXFLAGS) -pthread -c -o $@ $<
+else
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+endif
 
 clean:
 	$(RM) *.o *.so *.dylib BonDriverProxy .depend

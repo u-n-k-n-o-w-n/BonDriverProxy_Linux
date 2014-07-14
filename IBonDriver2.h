@@ -24,6 +24,9 @@ public:
 	virtual LPCTSTR EnumTuningSpace(const DWORD dwSpace) = 0;
 	virtual LPCTSTR EnumChannelName(const DWORD dwSpace, const DWORD dwChannel) = 0;
 
+	// Shut up warning
+	//   warning: 'IBonDriver2::SetChannel' hides overloaded virtual function
+	using IBonDriver::SetChannel;
 	virtual const BOOL SetChannel(const DWORD dwSpace, const DWORD dwChannel) = 0;
 	
 	virtual const DWORD GetCurSpace(void) = 0;
