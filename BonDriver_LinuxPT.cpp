@@ -759,7 +759,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 				{
 					if (bChangePMT)	// PMTが変更された
 					{
-						int len, adplen;
+						int len, adplen = 0;
 						BYTE *p;
 						BOOL bProc = TRUE;
 						// payload先頭を待つ(adaptation_fieldは無し、PSIのpointer_fieldは0x00の前提)
@@ -790,8 +790,6 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 								{
 									if (pSrc[3] & 0x20)	// adaptation_field有り(まあ無いとは思うけど一応)
 										adplen = pSrc[4] + 1;
-									else
-										adplen = 0;
 									if (adplen >= (TS_PKTSIZE - 4))
 									{
 										// adaptation_fieldの長さが異常なので最初からやり直し
@@ -820,6 +818,11 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 
 						if (bProc)
 						{
+							int limit;
+							if (bSplitPMT)
+								limit = (TS_PKTSIZE * 2) - 4 - adplen;	// 2TSパケット分までしか確認しない
+							else
+								limit = TS_PKTSIZE;	// 分割ではない時はadaptation_field無しなのはチェック済み
 							// PCR PIDセット
 							pid = GetPID(&p[13]);
 							PID_SET(pid, &pids);
@@ -830,8 +833,10 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							int left = desc_len;
 							while (left >= 2)
 							{
+								if ((off + 2) > limit)
+									break;
 								int cdesc_len = 2 + p[off+1];
-								if (cdesc_len > left)	// descriptor長さ異常
+								if (cdesc_len > left || (off + cdesc_len) > limit)	// descriptor長さ異常
 									break;
 								if (p[off] == 0x09)	// Conditional Access Descriptor
 								{
@@ -849,14 +854,9 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							off = 17 + desc_len;
 							// 13 = program_numberからprogram_info_lengthまでの9バイト + CRC_32の4バイト
 							len -= (13 + desc_len);
-							int limit;
-							if (bSplitPMT)
-								limit = (TS_PKTSIZE * 2) - 4 - adplen;	// 2TSパケット分までしか確認しない
-							else
-								limit = TS_PKTSIZE;	// 分割ではない時はadaptation_field無しなのはチェック済み
 							while (len >= 5)
 							{
-								if ((off + 4) >= limit)
+								if ((off + 5) > limit)
 									break;
 								if (p[off] != 0x0d)	// データ放送は破棄
 								{
