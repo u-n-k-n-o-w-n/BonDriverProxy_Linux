@@ -620,6 +620,7 @@ end:
 
 #define MAX_PID	0x2000		// (8 * sizeof(int))で割り切れる
 #define PID_SET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] |= (1 << ((pid) % (8 * sizeof(int)))))
+#define PID_CLR(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] &= ~(1 << ((pid) % (8 * sizeof(int)))))
 #define PID_ISSET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] & (1 << ((pid) % (8 * sizeof(int)))))
 #define PID_ZERO(map)		(::memset((map), 0 , sizeof(*(map))))
 struct pid_set {
@@ -631,15 +632,16 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 	cBonDriverLinuxPT *pLinuxPT = static_cast<cBonDriverLinuxPT *>(pv);
 	BYTE *pTsBuf, pPAT[TS_PKTSIZE], pPMT[TS_PKTSIZE * 2];
 	int pos;
-	unsigned char pat_ci, pmt_ci;
-	unsigned short ltsid, pidPMT;
+	unsigned char pat_ci, pmt_ci, lcat_version;
+	unsigned short ltsid, pidPMT, pidEMM;
 	BOOL bChangePMT, bSplitPMT;
 	pid_set pids;
 
 	pTsBuf = new BYTE[TS_BUFSIZE];
 	pos = 0;
-	pat_ci = 0x10;				// 0x1(payloadのみ) << 4 | 0x0(ci初期値)
-	ltsid = pidPMT = 0xffff;	// 現在のTSID及びPMTのPID
+	pat_ci = 0x10;						// 0x1(payloadのみ) << 4 | 0x0(ci初期値)
+	lcat_version = 0xff;
+	ltsid = pidPMT = pidEMM = 0xffff;	// 現在のTSID及びPMT,EMMのPID
 	bChangePMT = bSplitPMT = FALSE;
 	PID_ZERO(&pids);
 
@@ -730,17 +732,23 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 								pidPMT = pid;
 								bChangePMT = TRUE;
 								bSplitPMT = FALSE;
+								lcat_version = 0xff;
+								pidEMM = 0xffff;
 
 								// PIDマップ初期化
 								PID_ZERO(&pids);
-								// PMT PIDセット
+								// PMT PIDセット(マップにセットしても意味無いけど一応)
 								PID_SET(pid, &pids);
+								// CAT PIDセット(同上)
+								PID_SET(0x0001, &pids);
+								// NIT PIDセット
+								PID_SET(0x0010, &pids);
 								// SDT PIDセット
-								PID_SET(0x11, &pids);
+								PID_SET(0x0011, &pids);
 								// EIT PIDセット
-								PID_SET(0x12, &pids);
+								PID_SET(0x0012, &pids);
 								// TOT PIDセット
-								PID_SET(0x14, &pids);
+								PID_SET(0x0014, &pids);
 							}
 							else
 							{
@@ -753,6 +761,53 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							::memcpy(&pTsBuf[pos], pPAT, TS_PKTSIZE);
 							pos += TS_PKTSIZE;
 						}
+					}
+				}
+				else if (pid == 0x0001)	// CAT
+				{
+					// payload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
+					if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
+					{
+						// version_number
+						unsigned char ver = (pSrc[10] >> 1) & 0x1f;
+						if (ver != lcat_version)
+						{
+							// section_length
+							// 9 = 2つ目のreservedからlast_section_numberまでの5バイト + CRC_32の4バイト
+							int len = (((int)(pSrc[6] & 0x0f) << 8) | pSrc[7]) - 9;
+							// 13 = TSパケットの頭から最初のdescriptorまでのオフセット
+							int off = 13;
+							// CATも1TSパケットに収まってる前提
+							while (len >= 2)
+							{
+								if ((off + 2) > TS_PKTSIZE)
+									break;
+								int cdesc_len = 2 + pSrc[off+1];
+								if (cdesc_len > len || (off + cdesc_len) > TS_PKTSIZE)	// descriptor長さ異常
+									break;
+								if (pSrc[off] == 0x09)	// Conditional Access Descriptor
+								{
+									if (pSrc[off+1] >= 4 && (pSrc[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
+									{
+										// EMM PIDセット
+										pid = GetPID(&pSrc[off+4]);
+										if (pid != pidEMM)
+										{
+											if (pidEMM != 0xffff)
+												PID_CLR(pidEMM, &pids);
+											PID_SET(pid, &pids);
+											pidEMM = pid;
+										}
+										break;	// EMMが複数のPIDで送られてくる事は無い前提
+									}
+								}
+								off += cdesc_len;
+								len -= cdesc_len;
+							}
+							lcat_version = ver;
+						}
+						::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
+						pos += TS_PKTSIZE;
 					}
 				}
 				else if(pid == pidPMT)	// PMT
@@ -858,7 +913,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							{
 								if ((off + 5) > limit)
 									break;
-								if (p[off] != 0x0d)	// データ放送は破棄
+								if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
 								{
 									pid = GetPID(&p[off+1]);
 									PID_SET(pid, &pids);

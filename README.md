@@ -82,7 +82,7 @@ make driver
 
 の0を1にすると、BonDriverとしての1チャンネルを1サービスに割り当てる事ができます。
 いわゆるサービス指定したような感じのTSを出力するようになります。具体的に残しているのはPAT(対象サービスIDのみを含むように変更されます)、
-PMT、SDT、EIT、TOTの各PSI/SIと、指定したサービスのデータ放送以外の各PESとなっています。
+PMT、CAT、NIT、SDT、EIT、TOTの各PSI/SIと、ECM、EMM、それにもちろん指定したサービスの各PES(stream_typeが"ISO/IEC 13818-6 type D"の物以外)となっています。
 なおSDTは変更しないので、こちらのモードで使用中にチャンネルスキャンをするとチャンネルが多数ダブって検索される事になる為、
 正しいものを除いて無効化するようにして下さい。
 また、同じトラポンに含まれる別サービスがBonDriverのチャンネルとして別チャンネル扱いになる為、BonDriverProxy経由で使用する場合、
@@ -139,6 +139,9 @@ LICENSE参照。
 Jun/18/2014 unknown <unknown_@live.jp>
 
 ## 更新履歴
+
+* version 1.1.4.3 (Aug/23/2014)
+	* 1サービス1チャンネルモードの際に、CAT(とEMM)及びNITを削らない様にした
 
 * version 1.1.4.2 (Aug/15/2014)
 	* BonDriver_LinuxPTにBonDriverとしての1チャンネルを1サービスに割り当てるモードを追加
