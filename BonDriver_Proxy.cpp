@@ -1,6 +1,3 @@
-/*
-$ g++ -O2 -Wall -pthread -shared -fPIC -o BonDriver_Proxy.so BonDriver_Proxy.cpp -ldl
-*/
 #include "BonDriver_Proxy.h"
 
 namespace BonDriver_Proxy {
@@ -38,8 +35,10 @@ static int Init()
 		if (buf[0] == ';')
 			continue;
 		p = buf + ::strlen(buf) - 1;
-		while (*p == '\r' || *p == '\n')
+		while ((p >= buf) && (*p == '\r' || *p == '\n'))
 			*p-- = '\0';
+		if (p < buf)
+			continue;
 		if (!bHost && (::strncmp(buf, "ADDRESS=", 8) == 0))
 		{
 			p = &buf[8];
@@ -183,7 +182,7 @@ static int Init()
 cProxyClient::cProxyClient() : m_Error(m_c, m_m), m_SingleShot(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRecv(m_c, m_m), m_fifoTS(m_c, m_m)
 {
 	m_s = INVALID_SOCKET;
-	m_LastBuff = NULL;
+	m_LastBuf = NULL;
 	m_dwBufPos = 0;
 	::memset(m_pBuf, 0, sizeof(m_pBuf));
 	m_bBonDriver = m_bTuner = m_bRereased = FALSE;
@@ -250,17 +249,9 @@ cProxyClient::~cProxyClient()
 	{
 		LOCK(m_writeLock);
 		for (i = 0; i < 8; i++)
-		{
-			if (m_pBuf[i] != NULL)
-				delete[] m_pBuf[i];
-		}
-		::memset(m_pBuf, 0, sizeof(m_pBuf));
+			delete[] m_pBuf[i];
 		TsFlush();
-		if (m_LastBuff != NULL)
-		{
-			delete m_LastBuff;
-			m_LastBuff = NULL;
-		}
+		delete m_LastBuf;
 	}
 
 	for (i = 0; i < ebResNum; i++)
@@ -364,10 +355,11 @@ DWORD cProxyClient::Process()
 						u.dw = ntohl(*pdw);
 						m_fSignalLevel = u.f;
 
+						pPh->SetDeleteFlag(FALSE);
 						TS_DATA *pData = new TS_DATA();
 						pData->dwSize = dwSize;
-						pData->pbBuff = new BYTE[dwSize];
-						::memcpy(pData->pbBuff, &(pPh->m_pPacket->payload[sizeof(DWORD) * 2]), dwSize);
+						pData->pbBufHead = pPh->m_pBuf;
+						pData->pbBuf = &(pPh->m_pPacket->payload[sizeof(DWORD) * 2]);
 						m_fifoTS.Push(pData);
 					}
 				}
@@ -443,7 +435,7 @@ end:
 	return 0;
 }
 
-int cProxyClient::ReceiverHelper(char *pDst, int left)
+int cProxyClient::ReceiverHelper(char *pDst, DWORD left)
 {
 	int len, ret;
 	fd_set rd;
@@ -467,14 +459,9 @@ int cProxyClient::ReceiverHelper(char *pDst, int left)
 		if (len == 0)
 			continue;
 
-		if ((len = ::recv(m_s, pDst, left, 0)) == SOCKET_ERROR)
+		if ((len = ::recv(m_s, pDst, left, 0)) <= 0)
 		{
 			ret = -3;
-			goto err;
-		}
-		else if (len == 0)
-		{
-			ret = -4;
 			goto err;
 		}
 		left -= len;
@@ -489,15 +476,14 @@ err:
 void *cProxyClient::Receiver(LPVOID pv)
 {
 	cProxyClient *pProxy = static_cast<cProxyClient *>(pv);
-	DWORD &ret = pProxy->m_tRet;
-	int left;
+	DWORD left, &ret = pProxy->m_tRet;
 	char *p;
 	cPacketHolder *pPh = NULL;
-	const DWORD TsPacketBufSize = g_TsPacketBufSize;
+	const DWORD MaxPacketBufSize = g_TsPacketBufSize + (sizeof(DWORD) * 2);
 
 	while (1)
 	{
-		pPh = new cPacketHolder(16);
+		pPh = new cPacketHolder(MaxPacketBufSize);
 		left = sizeof(stPacketHead);
 		p = (char *)&(pPh->m_pPacket->head);
 		if (pProxy->ReceiverHelper(p, left) != 0)
@@ -513,46 +499,31 @@ void *cProxyClient::Receiver(LPVOID pv)
 			goto end;
 		}
 
-		left = (int)pPh->GetBodyLength();
+		left = pPh->GetBodyLength();
 		if (left == 0)
 		{
 			pProxy->m_fifoRecv.Push(pPh);
 			continue;
 		}
 
-		if ((!pPh->IsTS() && (left > 512)) || left < 0)
+		if (left > MaxPacketBufSize)
 		{
 			pProxy->m_Error.Set();
 			ret = 203;
 			goto end;
 		}
 
-		if (left >= 16)
-		{
-			if ((DWORD)left > (TsPacketBufSize + (sizeof(DWORD) * 2)))
-			{
-				pProxy->m_Error.Set();
-				ret = 204;
-				goto end;
-			}
-			cPacketHolder *pTmp = new cPacketHolder(left);
-			pTmp->m_pPacket->head = pPh->m_pPacket->head;
-			delete pPh;
-			pPh = pTmp;
-		}
-
 		p = (char *)(pPh->m_pPacket->payload);
 		if (pProxy->ReceiverHelper(p, left) != 0)
 		{
-			ret = 205;
+			ret = 204;
 			goto end;
 		}
 
 		pProxy->m_fifoRecv.Push(pPh);
 	}
 end:
-	if (pPh)
-		delete pPh;
+	delete pPh;
 //	pProxy->m_iEndCount++;
 	return &ret;
 }
@@ -704,10 +675,7 @@ void cProxyClient::CloseTuner(void)
 		LOCK(m_writeLock);
 		m_dwBufPos = 0;
 		for (int i = 0; i < 8; i++)
-		{
-			if (m_pBuf[i] != NULL)
-				delete[] m_pBuf[i];
-		}
+			delete[] m_pBuf[i];
 		::memset(m_pBuf, 0, sizeof(m_pBuf));
 	}
 }
@@ -763,14 +731,10 @@ const BOOL cProxyClient::GetTsStream(BYTE **ppDst, DWORD *pdwSize, DWORD *pdwRem
 		LOCK(m_writeLock);
 		if (m_fifoTS.Size() != 0)
 		{
-			if (m_LastBuff != NULL)
-			{
-				delete m_LastBuff;
-				m_LastBuff = NULL;
-			}
-			m_fifoTS.Pop(&m_LastBuff);
-			*ppDst = m_LastBuff->pbBuff;
-			*pdwSize = m_LastBuff->dwSize;
+			delete m_LastBuf;
+			m_fifoTS.Pop(&m_LastBuf);
+			*ppDst = m_LastBuf->pbBuf;
+			*pdwSize = m_LastBuf->dwSize;
 			*pdwRemain = (DWORD)m_fifoTS.Size();
 			b = TRUE;
 		}

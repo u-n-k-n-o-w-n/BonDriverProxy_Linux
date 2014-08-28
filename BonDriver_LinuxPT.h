@@ -127,17 +127,16 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 
 struct TS_DATA {
-	BYTE *pbBuff;
+	BYTE *pbBuf;
 	DWORD dwSize;
 	TS_DATA(void)
 	{
-		pbBuff = NULL;
+		pbBuf = NULL;
 		dwSize = 0;
 	}
 	~TS_DATA(void)
 	{
-		if (pbBuff)
-			delete[] pbBuff;
+		delete[] pbBuf;
 	}
 };
 
@@ -248,7 +247,7 @@ class cBonDriverLinuxPT : public IBonDriver2 {
 	pthread_mutex_t m_m;
 	cTSFifo m_fifoTS;
 	cRawTSFifo m_fifoRawTS;
-	TS_DATA *m_LastBuff;
+	TS_DATA *m_LastBuf;
 	cCriticalSection m_writeLock;
 	char m_TunerName[64];
 	BOOL m_bTuner;

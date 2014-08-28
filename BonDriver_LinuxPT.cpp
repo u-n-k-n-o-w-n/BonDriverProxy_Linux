@@ -1,6 +1,3 @@
-/*
-$ g++ -O2 -Wall -pthread -shared -fPIC -o BonDriver_LinuxPT.so BonDriver_LinuxPT.cpp -ldl
-*/
 #include "BonDriver_LinuxPT.h"
 #include "plex.cpp"
 
@@ -82,8 +79,10 @@ static int Init()
 		if (buf[0] == ';')
 			continue;
 		p = buf + ::strlen(buf) - 1;
-		while (*p == '\r' || *p == '\n')
+		while ((p >= buf) && (*p == '\r' || *p == '\n'))
 			*p-- = '\0';
+		if (p < buf)
+			continue;
 		if ((idx != 0) && (::strncmp(buf, "#ISDB_S", 7) == 0))
 			idx = 0;
 		else if ((idx != 1) && (::strncmp(buf, "#ISDB_T", 7) == 0))
@@ -283,7 +282,7 @@ cBonDriverLinuxPT::cBonDriverLinuxPT() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_
 {
 	m_spThis = this;
 	Convert((char *)TUNER_NAME, m_TunerName, sizeof(m_TunerName));
-	m_LastBuff = NULL;
+	m_LastBuf = NULL;
 	m_bTuner = FALSE;
 	m_fSignalLevel = 0;
 	m_dwSpace = m_dwChannel = 0xff;
@@ -305,11 +304,7 @@ cBonDriverLinuxPT::~cBonDriverLinuxPT()
 	{
 		LOCK(m_writeLock);
 		TsFlush(g_UseServiceID);
-		if (m_LastBuff != NULL)
-		{
-			delete m_LastBuff;
-			m_LastBuff = NULL;
-		}
+		delete m_LastBuf;
 	}
 	::pthread_cond_destroy(&m_c);
 	::pthread_mutex_destroy(&m_m);
@@ -400,14 +395,10 @@ const BOOL cBonDriverLinuxPT::GetTsStream(BYTE **ppDst, DWORD *pdwSize, DWORD *p
 		LOCK(m_writeLock);
 		if (m_fifoTS.Size() != 0)
 		{
-			if (m_LastBuff != NULL)
-			{
-				delete m_LastBuff;
-				m_LastBuff = NULL;
-			}
-			m_fifoTS.Pop(&m_LastBuff);
-			*ppDst = m_LastBuff->pbBuff;
-			*pdwSize = m_LastBuff->dwSize;
+			delete m_LastBuf;
+			m_fifoTS.Pop(&m_LastBuf);
+			*ppDst = m_LastBuf->pbBuf;
+			*pdwSize = m_LastBuf->dwSize;
 			*pdwRemain = (DWORD)m_fifoTS.Size();
 			b = TRUE;
 		}
@@ -597,7 +588,7 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 		{
 			TS_DATA *pData = new TS_DATA();
 			pData->dwSize = TS_BUFSIZE;
-			pData->pbBuff = pTsBuf;
+			pData->pbBuf = pTsBuf;
 			if (g_UseServiceID)
 				pLinuxPT->m_fifoRawTS.Push(pData);
 			else
@@ -656,10 +647,10 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 
 		case WAIT_OBJECT_0 + 1:
 		{
-			TS_DATA *pRawBuff = NULL;
-			pLinuxPT->m_fifoRawTS.Pop(&pRawBuff);
-			BYTE *pSrc = pRawBuff->pbBuff;
-			DWORD dwLeft = pRawBuff->dwSize;	// 必ずTS_PKTSIZEの倍数で来る
+			TS_DATA *pRawBuf = NULL;
+			pLinuxPT->m_fifoRawTS.Pop(&pRawBuf);
+			BYTE *pSrc = pRawBuf->pbBuf;
+			DWORD dwLeft = pRawBuf->dwSize;	// 必ずTS_PKTSIZEの倍数で来る
 			while (dwLeft > 0)
 			{
 				unsigned short pid = GetPID(&pSrc[1]);
@@ -957,13 +948,13 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 				{
 					TS_DATA *pData = new TS_DATA();
 					pData->dwSize = TS_BUFSIZE;
-					pData->pbBuff = pTsBuf;
+					pData->pbBuf = pTsBuf;
 					pLinuxPT->m_fifoTS.Push(pData);
 					pTsBuf = new BYTE[TS_BUFSIZE];
 					pos = 0;
 				}
 			}
-			delete pRawBuff;
+			delete pRawBuf;
 		}
 		}
 	}

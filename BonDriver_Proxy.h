@@ -196,17 +196,15 @@ class cPacketHolder {
 	friend class cProxyClient;
 	union {
 		stPacket *m_pPacket;
-		BYTE *m_pBuff;
+		BYTE *m_pBuf;
 	};
 	size_t m_Size;
+	BOOL m_bDelete;
 
 	inline void init(size_t PayloadSize)
 	{
-		m_pBuff = new BYTE[sizeof(stPacketHead) + PayloadSize];
-		::memset(m_pBuff, 0, sizeof(stPacketHead));
-		m_pPacket->head.m_bSync = SYNC_BYTE;
-		m_pPacket->head.m_dwBodyLength = htonl((DWORD)PayloadSize);
-		m_Size = sizeof(stPacketHead) + PayloadSize;
+		m_pBuf = new BYTE[sizeof(stPacketHead) + PayloadSize];
+		m_bDelete = TRUE;
 	}
 
 public:
@@ -218,22 +216,24 @@ public:
 	cPacketHolder(enumCommand eCmd, size_t PayloadSize)
 	{
 		init(PayloadSize);
+		*(DWORD *)m_pBuf = 0;
+		m_pPacket->head.m_bSync = SYNC_BYTE;
 		SetCommand(eCmd);
+		m_pPacket->head.m_dwBodyLength = htonl((DWORD)PayloadSize);
+		m_Size = sizeof(stPacketHead) + PayloadSize;
 	}
 
 	~cPacketHolder()
 	{
-		if (m_pBuff)
-		{
-			delete[] m_pBuff;
-			m_pBuff = NULL;
-		}
+		if (m_bDelete)
+			delete[] m_pBuf;
 	}
 	inline BOOL IsValid(){ return (m_pPacket->head.m_bSync == SYNC_BYTE); }
 	inline BOOL IsTS(){ return (m_pPacket->head.m_bCommand == (BYTE)eGetTsStream); }
 	inline enumCommand GetCommand(){ return (enumCommand)m_pPacket->head.m_bCommand; }
 	inline void SetCommand(enumCommand eCmd){ m_pPacket->head.m_bCommand = (BYTE)eCmd; }
 	inline DWORD GetBodyLength(){ return ntohl(m_pPacket->head.m_dwBodyLength); }
+	inline void SetDeleteFlag(BOOL b){ m_bDelete = b; }
 };
 
 class cPacketFifo : protected std::queue<cPacketHolder *> {
@@ -294,17 +294,17 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 
 struct TS_DATA {
-	BYTE *pbBuff;
+	BYTE *pbBufHead;
+	BYTE *pbBuf;
 	DWORD dwSize;
 	TS_DATA(void)
 	{
-		pbBuff = NULL;
+		pbBufHead = pbBuf = NULL;
 		dwSize = 0;
 	}
 	~TS_DATA(void)
 	{
-		if (pbBuff)
-			delete[] pbBuff;
+		delete[] pbBufHead;
 	}
 };
 
@@ -403,7 +403,7 @@ class cProxyClient : public IBonDriver3 {
 	cPacketFifo m_fifoSend;
 	cPacketFifo m_fifoRecv;
 	cTSFifo m_fifoTS;
-	TS_DATA *m_LastBuff;
+	TS_DATA *m_LastBuf;
 	cEvent *m_bResEvent[ebResNum];
 	BOOL m_bRes[ebResNum];
 	cEvent *m_dwResEvent[edwResNum];
@@ -423,7 +423,7 @@ class cProxyClient : public IBonDriver3 {
 	cCriticalSection m_readLock;	// 一応ロックしてるけど、厳密には本来求めてるロックは保証できてない
 
 	DWORD Process();
-	int ReceiverHelper(char *pDst, int left);
+	int ReceiverHelper(char *pDst, DWORD left);
 	static void *Receiver(LPVOID pv);
 	void makePacket(enumCommand eCmd);
 	void makePacket(enumCommand eCmd, LPCSTR);

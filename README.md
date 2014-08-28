@@ -140,6 +140,16 @@ Jun/18/2014 unknown <unknown_@live.jp>
 
 ## 更新履歴
 
+* version 1.1.4.4 (Aug/28/2014)
+	* 設定ファイルパース時の、空行に対するバウンダリチェック漏れ修正
+	* クライアント側でのTSデータ用メモリ確保&コピー処理を削減
+	* サーバ、クライアントそれぞれの受信スレッドを少し変更  
+	  ※冗長なチェックの削除及び、やり取りされるコマンドパケットの内容(サーバからクライアントのパケットは殆どが  
+	  ※TSデータ用=ペイロードの大きなパケットである、等)にあわせた最適化
+	* delete対象として、NULLでない場合が大半の物に付いてはNULLチェック削除
+	* delete後、即スコープを抜けるなどでNULLクリアが不要な物はNULLクリア削除
+	* その他ロジックは変更無しでのソースコード整形
+
 * version 1.1.4.3 (Aug/23/2014)
 	* 1サービス1チャンネルモードの際に、CAT(とEMM)及びNITを削らない様にした
 
@@ -182,10 +192,11 @@ Jun/18/2014 unknown <unknown_@live.jp>
 
 * version 1.1.3.0 (Jun/25/2014)
 	* クライアント側にサーバへの接続タイムアウトの指定を出来る機能を追加  
-	  ※confのCONNECT_TIMEOUTで指定(単位は秒)
+	  ※設定ファイルのCONNECT_TIMEOUTで指定(単位は秒)
 	* ついでにWOLのパケット自動送信機能を追加  
-	  ※使い方に難しい点は無いと思うのでBonDriver_Proxy.conf参照。TARGET_MACADDRESSは必須だが、TARGET_ADDRESS及びTARGET_PORT行に関しては、無い場合はADDRESSとPORTをそれぞれ使用する。  
-	  ※なお、TARGET_PORTはUDPのポートである事に注意。
+	  ※使い方に難しい点は無いと思うのでBonDriver_Proxy.conf参照  
+	  ※TARGET_MACADDRESSは必須だが、TARGET_ADDRESS及びTARGET_PORT行に関しては、無い場合はADDRESSとPORTをそれぞれ使用する  
+	  ※なお、TARGET_PORTはUDPのポートである事に注意
 
 * version 1.1.2.1 (Jun/21/2014)
 	* アプリ側で環境依存を気にしないでSIGALRM使えるようにusleep()をnanosleep()に変更

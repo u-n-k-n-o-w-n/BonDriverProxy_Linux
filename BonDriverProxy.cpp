@@ -1,6 +1,3 @@
-/*
-$ g++ -O2 -Wall -pthread -rdynamic -o BonDriverProxy BonDriverProxy.cpp -ldl
-*/
 #include "BonDriverProxy.h"
 
 namespace BonDriverProxy {
@@ -538,7 +535,7 @@ end:
 	return 0;
 }
 
-int cProxyServer::ReceiverHelper(char *pDst, int left)
+int cProxyServer::ReceiverHelper(char *pDst, DWORD left)
 {
 	int len, ret;
 	fd_set rd;
@@ -562,14 +559,9 @@ int cProxyServer::ReceiverHelper(char *pDst, int left)
 		if (len == 0)
 			continue;
 
-		if ((len = ::recv(m_s, pDst, left, 0)) == SOCKET_ERROR)
+		if ((len = ::recv(m_s, pDst, left, 0)) <= 0)
 		{
 			ret = -3;
-			goto err;
-		}
-		else if (len == 0)
-		{
-			ret = -4;
 			goto err;
 		}
 		left -= len;
@@ -584,8 +576,7 @@ err:
 void *cProxyServer::Receiver(LPVOID pv)
 {
 	cProxyServer *pProxy = static_cast<cProxyServer *>(pv);
-	DWORD &ret = pProxy->m_tRet;
-	int left;
+	DWORD left, &ret = pProxy->m_tRet;
 	char *p;
 	cPacketHolder *pPh = NULL;
 
@@ -607,22 +598,21 @@ void *cProxyServer::Receiver(LPVOID pv)
 			goto end;
 		}
 
-		left = (int)pPh->GetBodyLength();
+		left = pPh->GetBodyLength();
 		if (left == 0)
 		{
 			pProxy->m_fifoRecv.Push(pPh);
 			continue;
 		}
 
-		if (left > 512 || left < 0)
+		if (left > 16)
 		{
-			pProxy->m_Error.Set();
-			ret = 203;
-			goto end;
-		}
-
-		if (left >= 16)
-		{
+			if (left > 512)
+			{
+				pProxy->m_Error.Set();
+				ret = 203;
+				goto end;
+			}
 			cPacketHolder *pTmp = new cPacketHolder(left);
 			pTmp->m_pPacket->head = pPh->m_pPacket->head;
 			delete pPh;
@@ -639,8 +629,7 @@ void *cProxyServer::Receiver(LPVOID pv)
 		pProxy->m_fifoRecv.Push(pPh);
 	}
 end:
-	if (pPh)
-		delete pPh;
+	delete pPh;
 	return &ret;
 }
 
