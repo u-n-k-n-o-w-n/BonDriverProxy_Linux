@@ -1,7 +1,7 @@
 /*
 $ g++ -O2 -Wall -rdynamic -o sample sample.cpp -ldl
 */
-#define FILE_OFFSET_BITS	64
+#define _FILE_OFFSET_BITS	64
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
