@@ -774,7 +774,7 @@ void *cProxyServer::TsReader(LPVOID pv)
 						(*it)->makePacket(eGetTsStream, pTsBuf, TsPacketBufSize, fSignalLevel);
 					left = dwSize - dwLen;
 					pBuf += dwLen;
-					while (left > TsPacketBufSize)
+					while (left >= TsPacketBufSize)
 					{
 						for (std::list<cProxyServer *>::iterator it = TsReceiversList.begin(); it != TsReceiversList.end(); ++it)
 							(*it)->makePacket(eGetTsStream, pBuf, TsPacketBufSize, fSignalLevel);
