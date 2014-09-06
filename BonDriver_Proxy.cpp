@@ -5,6 +5,26 @@ namespace BonDriver_Proxy {
 static std::list<cProxyClient *> InstanceList;
 static cCriticalSection Lock_Global;
 
+static BOOL IsTagMatch(const char *line, const char *tag, char **value)
+{
+	const int taglen = ::strlen(tag);
+	const char *p;
+
+	if (::strncmp(line, tag, taglen) != 0)
+		return FALSE;
+	p = line + taglen;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (value == NULL && *p == '\0')
+		return TRUE;
+	if (*p++ != '=')
+		return FALSE;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	*value = const_cast<char *>(p);
+	return TRUE;
+}
+
 static int Init()
 {
 	FILE *fp;
@@ -39,78 +59,51 @@ static int Init()
 			*p-- = '\0';
 		if (p < buf)
 			continue;
-		if (!bHost && (::strncmp(buf, "ADDRESS=", 8) == 0))
+		if (!bHost && IsTagMatch(buf, "ADDRESS", &p))
 		{
-			p = &buf[8];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			::strncpy(g_Host, p, sizeof(g_Host) - 1);
 			g_Host[sizeof(g_Host) - 1] = '\0';
 			bHost = TRUE;
 		}
-		else if (!bPort && (::strncmp(buf, "PORT=", 5) == 0))
+		else if (!bPort && IsTagMatch(buf, "PORT", &p))
 		{
-			p = &buf[5];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_Port = ::atoi(p);
 			bPort = TRUE;
 		}
-		else if (!bBonDriver && (::strncmp(buf, "BONDRIVER=", 10) == 0))
+		else if (!bBonDriver && IsTagMatch(buf, "BONDRIVER", &p))
 		{
-			p = &buf[10];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			::strncpy(g_BonDriver, p, sizeof(g_BonDriver) - 1);
 			g_BonDriver[sizeof(g_BonDriver) - 1] = '\0';
 			bBonDriver = TRUE;
 		}
-		else if (!bChannelLock && (::strncmp(buf, "CHANNEL_LOCK=", 13) == 0))
+		else if (!bChannelLock && IsTagMatch(buf, "CHANNEL_LOCK", &p))
 		{
-			p = &buf[13];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_ChannelLock = ::atoi(p);
 			bChannelLock = TRUE;
 		}
-		else if (!bConnectTimeOut && (::strncmp(buf, "CONNECT_TIMEOUT=", 16) == 0))
+		else if (!bConnectTimeOut && IsTagMatch(buf, "CONNECT_TIMEOUT", &p))
 		{
-			p = &buf[16];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_ConnectTimeOut = ::atoi(p);
 			bConnectTimeOut = TRUE;
 		}
-		else if (!bUseMagicPacket && (::strncmp(buf, "USE_MAGICPACKET=", 16) == 0))
+		else if (!bUseMagicPacket && IsTagMatch(buf, "USE_MAGICPACKET", &p))
 		{
-			p = &buf[16];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_UseMagicPacket = ::atoi(p);
 			bUseMagicPacket = TRUE;
 		}
-		else if (!bTargetHost && (::strncmp(buf, "TARGET_ADDRESS=", 15) == 0))
+		else if (!bTargetHost && IsTagMatch(buf, "TARGET_ADDRESS", &p))
 		{
-			p = &buf[15];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			::strncpy(g_TargetHost, p, sizeof(g_TargetHost) - 1);
 			g_TargetHost[sizeof(g_TargetHost) - 1] = '\0';
 			bTargetHost = TRUE;
 		}
-		else if (!bTargetPort && (::strncmp(buf, "TARGET_PORT=", 12) == 0))
+		else if (!bTargetPort && IsTagMatch(buf, "TARGET_PORT", &p))
 		{
-			p = &buf[12];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_TargetPort = ::atoi(p);
 			bTargetPort = TRUE;
 		}
-		else if (!bTargetMac && (::strncmp(buf, "TARGET_MACADDRESS=", 18) == 0))
+		else if (!bTargetMac && IsTagMatch(buf, "TARGET_MACADDRESS", &p))
 		{
-			p = &buf[18];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			char mac[32];
 			::memset(mac, 0, sizeof(mac));
 			::strncpy(mac, p, sizeof(mac) - 1);
@@ -136,27 +129,18 @@ static int Init()
 			if (!bErr)
 				bTargetMac = TRUE;
 		}
-		else if (!bPacketFifoSize && (::strncmp(buf, "PACKET_FIFO_SIZE=", 17) == 0))
+		else if (!bPacketFifoSize && IsTagMatch(buf, "PACKET_FIFO_SIZE", &p))
 		{
-			p = &buf[17];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_PacketFifoSize = ::atoi(p);
 			bPacketFifoSize = TRUE;
 		}
-		else if (!bTsFifoSize && (::strncmp(buf, "TS_FIFO_SIZE=", 13) == 0))
+		else if (!bTsFifoSize && IsTagMatch(buf, "TS_FIFO_SIZE", &p))
 		{
-			p = &buf[13];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_TsFifoSize = ::atoi(p);
 			bTsFifoSize = TRUE;
 		}
-		else if (!bTsPacketBufSize && (::strncmp(buf, "TSPACKET_BUFSIZE=", 17) == 0))
+		else if (!bTsPacketBufSize && IsTagMatch(buf, "TSPACKET_BUFSIZE", &p))
 		{
-			p = &buf[17];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_TsPacketBufSize = ::atoi(p);
 			bTsPacketBufSize = TRUE;
 		}

@@ -46,6 +46,26 @@ static DWORD CalcCRC32(BYTE *p, DWORD len)
 	return crc;
 }
 
+static BOOL IsTagMatch(const char *line, const char *tag, char **value)
+{
+	const int taglen = ::strlen(tag);
+	const char *p;
+
+	if (::strncmp(line, tag, taglen) != 0)
+		return FALSE;
+	p = line + taglen;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (value == NULL && *p == '\0')
+		return TRUE;
+	if (*p++ != '=')
+		return FALSE;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	*value = const_cast<char *>(p);
+	return TRUE;
+}
+
 static int Init()
 {
 	FILE *fp;
@@ -83,15 +103,12 @@ static int Init()
 			*p-- = '\0';
 		if (p < buf)
 			continue;
-		if ((idx != 0) && (::strncmp(buf, "#ISDB_S", 7) == 0))
+		if ((idx != 0) && IsTagMatch(buf, "#ISDB_S", NULL))
 			idx = 0;
-		else if ((idx != 1) && (::strncmp(buf, "#ISDB_T", 7) == 0))
+		else if ((idx != 1) && IsTagMatch(buf, "#ISDB_T", NULL))
 			idx = 1;
-		else if (!bdFlag && (::strncmp(buf, "#DEVICE=", 8) == 0))
+		else if (!bdFlag && IsTagMatch(buf, "#DEVICE", &p))
 		{
-			p = &buf[8];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			::strncpy(g_Device, p, sizeof(g_Device) - 1);
 			g_Device[sizeof(g_Device) - 1] = '\0';
 			if ((p = ::strstr(g_Device, "video")) != NULL)	// PT
@@ -119,19 +136,13 @@ static int Init()
 			}
 			bdFlag = TRUE;
 		}
-		else if (!blFlag && (::strncmp(buf, "#USELNB=", 8) == 0))
+		else if (!blFlag && IsTagMatch(buf, "#USELNB", &p))
 		{
-			p = &buf[8];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_UseLNB = ::atoi(p);
 			blFlag = TRUE;
 		}
-		else if (!bsFlag && (::strncmp(buf, "#USESERVICEID=", 14) == 0))
+		else if (!bsFlag && IsTagMatch(buf, "#USESERVICEID", &p))
 		{
-			p = &buf[14];
-			while (*p == ' ' || *p == '\t')
-				p++;
 			g_UseServiceID = ::atoi(p);
 			bsFlag = TRUE;
 		}
