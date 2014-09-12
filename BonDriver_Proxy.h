@@ -96,10 +96,10 @@ public:
 		return TRUE;
 	}
 
-	DWORD Wait()
+	DWORD Wait(cEvent *err)
 	{
-		cEvent *h[1] = { this };
-		return MultipleWait(1, h);
+		cEvent *h[2] = { err, this };
+		return MultipleWait(2, h);
 	}
 
 	static DWORD MultipleWait(int num, cEvent **e, BOOL bAll = FALSE)
@@ -440,8 +440,7 @@ public:
 	virtual ~cProxyClient();
 	void setSocket(SOCKET s){ m_s = s; }
 	void setThreadHandle(pthread_t h){ m_hThread = h; }
-	BOOL IsError(){ return m_Error.IsSet(); }
-	void WaitSingleShot(){ m_SingleShot.Wait(); }
+	DWORD WaitSingleShot(){ return m_SingleShot.Wait(&m_Error); }
 	static void *ProcessEntry(LPVOID pv);
 
 	BOOL SelectBonDriver();
