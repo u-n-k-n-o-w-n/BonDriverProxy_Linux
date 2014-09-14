@@ -632,10 +632,11 @@ struct pid_set {
 void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 {
 	cBonDriverLinuxPT *pLinuxPT = static_cast<cBonDriverLinuxPT *>(pv);
-	BYTE *pTsBuf, pPAT[TS_PKTSIZE], pPMT[TS_PKTSIZE * 2];
+	BYTE *pTsBuf, pPAT[TS_PKTSIZE];
+	BYTE pPMT[4104+TS_PKTSIZE];	// 4104 = 8(TSヘッダ + pointer_field + table_idからsection_length) + 4096(セクション長最大値)
 	int pos;
 	unsigned char pat_ci, pmt_ci, lcat_version;
-	unsigned short ltsid, pidPMT, pidEMM;
+	unsigned short ltsid, pidPMT, pidEMM, pmt_tail;
 	BOOL bChangePMT, bSplitPMT;
 	pid_set pids;
 
@@ -749,8 +750,12 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 								PID_SET(0x0011, &pids);
 								// EIT PIDセット
 								PID_SET(0x0012, &pids);
+								PID_SET(0x0026, &pids);
+								PID_SET(0x0027, &pids);
 								// TOT PIDセット
 								PID_SET(0x0014, &pids);
+								// CDT PIDセット
+								PID_SET(0x0029, &pids);
 							}
 							else
 							{
@@ -816,9 +821,8 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 				{
 					if (bChangePMT)	// PMTが変更された
 					{
-						int len, adplen = 0;
+						int len;
 						BYTE *p;
-						BOOL bProc = TRUE;
 						// payload先頭を待つ(adaptation_fieldは無し、PSIのpointer_fieldは0x00の前提)
 						if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 						{
@@ -827,113 +831,124 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							if (len > (TS_PKTSIZE - 8))	// TSパケットを跨ってる
 							{
 								::memcpy(pPMT, pSrc, TS_PKTSIZE);
+								// コピーしたデータの終端位置
+								pmt_tail = TS_PKTSIZE;
 								bSplitPMT = TRUE;
-								bProc = FALSE;
 								pmt_ci = pSrc[3] & 0x0f;
 								if (pmt_ci == 0x0f)
 									pmt_ci = 0;
 								else
 									pmt_ci++;
+								goto next;
 							}
-							else
-								p = pSrc;
+							// 揃った
+							p = pSrc;
 						}
 						else
 						{
-							if (bSplitPMT)	// 分割PMTの続き待ち
+							if (!bSplitPMT)	// 分割PMTの続き待ち中でなければ
+								goto next;
+							// CIが期待している値ではない、もしくはpayloadが無い場合
+							if (((pSrc[3] & 0x0f) != pmt_ci) || !(pSrc[3] & 0x10))
 							{
-								// CIが期待している値で、かつpayloadあり
-								if (((pSrc[3] & 0x0f) == pmt_ci) && (pSrc[3] & 0x10))
+								// 最初からやり直し
+								bSplitPMT = FALSE;
+								goto next;
+							}
+							int adplen;
+							if (pSrc[3] & 0x20)	// adaptation_field有り(まあ無いとは思うけど一応)
+							{
+								adplen = pSrc[4] + 1;
+								if (adplen >= (TS_PKTSIZE - 4))
 								{
-									if (pSrc[3] & 0x20)	// adaptation_field有り(まあ無いとは思うけど一応)
-										adplen = pSrc[4] + 1;
-									if (adplen >= (TS_PKTSIZE - 4))
-									{
-										// adaptation_fieldの長さが異常なので最初からやり直し
-										bSplitPMT = FALSE;
-										bProc = FALSE;
-									}
-									else
-									{
-										// 分割PMTの続きコピー
-										::memcpy(&pPMT[TS_PKTSIZE], &pSrc[4 + adplen], TS_PKTSIZE - 4 - adplen);
-										// section_length
-										len = (((int)(pPMT[6] & 0x0f) << 8) | pPMT[7]);
-										p = pPMT;
-									}
-								}
-								else
-								{
-									// CIが一致してない時は最初からやり直し
+									// adaptation_fieldの長さが異常なので最初からやり直し
 									bSplitPMT = FALSE;
-									bProc = FALSE;
+									goto next;
 								}
 							}
 							else
-								bProc = FALSE;
+								adplen = 0;
+							// 分割PMTの続きコピー
+							// pPMTのサイズはTS_PKTSIZEバイト余分に確保しているのでこれでも大丈夫
+							::memcpy(&pPMT[pmt_tail], &pSrc[4 + adplen], TS_PKTSIZE - 4 - adplen);
+							// section_length
+							len = (((int)(pPMT[6] & 0x0f) << 8) | pPMT[7]);
+							if (len > (pmt_tail - 8 + (TS_PKTSIZE - 4 - adplen)))	// まだ全部揃ってない
+							{
+								pmt_tail += (TS_PKTSIZE - 4 - adplen);
+								if (pmt_ci == 0x0f)
+									pmt_ci = 0;
+								else
+									pmt_ci++;
+								goto next;
+							}
+							// 揃った
+							p = pPMT;
 						}
-
-						if (bProc)
+						// この時点でセクションは必ず揃っている
+						int limit = 8 + len;
+						// PCR PIDセット
+						pid = GetPID(&p[13]);
+						PID_SET(pid, &pids);
+						// program_info_length
+						int desc_len = (((int)(p[15] & 0x0f) << 8) | p[16]);
+						// 17 = 最初のdescriptorのオフセット
+						int off = 17;
+						int left = desc_len;
+						while (left >= 2)
 						{
-							int limit;
-							if (bSplitPMT)
-								limit = (TS_PKTSIZE * 2) - 4 - adplen;	// 2TSパケット分までしか確認しない
-							else
-								limit = TS_PKTSIZE;	// 分割ではない時はadaptation_field無しなのはチェック済み
-							// PCR PIDセット
-							pid = GetPID(&p[13]);
-							PID_SET(pid, &pids);
-							// program_info_length
-							int desc_len = (((int)(p[15] & 0x0f) << 8) | p[16]);
-							// 17 = 最初のdescriptorのオフセット
-							int off = 17;
-							int left = desc_len;
-							while (left >= 2)
+							if ((off + 2) > limit)	// program_info_length異常
 							{
-								if ((off + 2) > limit)
-									break;
-								int cdesc_len = 2 + p[off+1];
-								if (cdesc_len > left || (off + cdesc_len) > limit)	// descriptor長さ異常
-									break;
-								if (p[off] == 0x09)	// Conditional Access Descriptor
-								{
-									if (p[off+1] >= 4 && (p[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
-									{
-										// ECM PIDセット
-										pid = GetPID(&p[off+4]);
-										PID_SET(pid, &pids);
-									}
-								}
-								off += cdesc_len;
-								left -= cdesc_len;
+								bSplitPMT = FALSE;
+								goto next;
 							}
-							// データ異常が無ければ必要無いが一応
-							off = 17 + desc_len;
-							// 13 = program_numberからprogram_info_lengthまでの9バイト + CRC_32の4バイト
-							len -= (13 + desc_len);
-							while (len >= 5)
+							int cdesc_len = 2 + p[off+1];
+							if (cdesc_len > left || (off + cdesc_len) > limit)	// descriptor長さ異常
 							{
-								if ((off + 5) > limit)
-									break;
-								if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
+								bSplitPMT = FALSE;
+								goto next;
+							}
+							if (p[off] == 0x09)	// Conditional Access Descriptor
+							{
+								if (p[off+1] >= 4 && (p[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
 								{
-									pid = GetPID(&p[off+1]);
+									// ECM PIDセット
+									pid = GetPID(&p[off+4]);
 									PID_SET(pid, &pids);
 								}
-								// ES_info_length + 5(stream_typeからES_info_lengthまでの5バイト)
-								int cdesc_len = (((int)(p[off+3] & 0x0f) << 8) | p[off+4]) + 5;
-								off += cdesc_len;
-								len -= cdesc_len;
 							}
-							// PMTが複数パケットに分かれている場合は、pTsBufのバウンダリチェックが
-							// メンドクサイので今回のPMTは破棄(次回以降のから保存する事になる)
-							if (!bSplitPMT)
-							{
-								::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
-								pos += TS_PKTSIZE;
-							}
-							bChangePMT = bSplitPMT = FALSE;
+							off += cdesc_len;
+							left -= cdesc_len;
 						}
+						// データ異常が無ければ必要無いが一応
+						off = 17 + desc_len;
+						// 13 = program_numberからprogram_info_lengthまでの9バイト + CRC_32の4バイト
+						len -= (13 + desc_len);
+						while (len >= 5)
+						{
+							if ((off + 5) > limit)	// program_info_length異常
+							{
+								bSplitPMT = FALSE;
+								goto next;
+							}
+							if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
+							{
+								pid = GetPID(&p[off+1]);
+								PID_SET(pid, &pids);
+							}
+							// ES_info_length + 5(stream_typeからES_info_lengthまでの5バイト)
+							int cdesc_len = (((int)(p[off+3] & 0x0f) << 8) | p[off+4]) + 5;
+							off += cdesc_len;
+							len -= cdesc_len;
+						}
+						// PMTが複数パケットに分かれていない場合のみ保存する
+						// 複数パケットに分かれていた場合は今回のPMTは破棄(次回以降のから保存する事になる)
+						if (!bSplitPMT)
+						{
+							::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
+							pos += TS_PKTSIZE;
+						}
+						bChangePMT = bSplitPMT = FALSE;
 					}
 					else
 					{
@@ -950,6 +965,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					}
 				}
 
+			next:
 				pSrc += TS_PKTSIZE;
 				dwLeft -= TS_PKTSIZE;
 
