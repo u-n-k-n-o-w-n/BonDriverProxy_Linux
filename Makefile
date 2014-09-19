@@ -3,7 +3,7 @@
 SRCDIR = .
 LDFLAGS =
 LIBS = -ldl
-SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp
+SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
 
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
@@ -21,7 +21,7 @@ endif
 all: server client driver
 server: BonDriverProxy
 client: BonDriver_Proxy.$(EXT)
-driver: BonDriver_LinuxPT.$(EXT)
+driver: BonDriver_LinuxPT.$(EXT) BonDriver_DVB.$(EXT)
 
 BonDriverProxy: BonDriverProxy.o
 	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
@@ -30,6 +30,13 @@ BonDriver_Proxy.$(EXT): BonDriver_Proxy.$(EXT).o
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
 
 BonDriver_LinuxPT.$(EXT): BonDriver_LinuxPT.$(EXT).o
+ifeq ($(UNAME), Darwin)
+	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS) -liconv
+else
+	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
+endif
+
+BonDriver_DVB.$(EXT): BonDriver_DVB.$(EXT).o
 ifeq ($(UNAME), Darwin)
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS) -liconv
 else
