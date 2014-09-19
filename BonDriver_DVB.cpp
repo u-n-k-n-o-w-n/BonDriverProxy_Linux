@@ -792,6 +792,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 		{
 			TS_DATA *pRawBuf = NULL;
 			pLinuxPT->m_fifoRawTS.Pop(&pRawBuf);
+			if (pRawBuf == NULL)	// イベントのトリガからPop()までの間に別スレッドにFlush()される可能性はゼロではない
+				break;
 			BYTE *pSrc = pRawBuf->pbBuf;
 			DWORD dwLeft = pRawBuf->dwSize;	// 必ずTS_PKTSIZEの倍数で来る
 			while (dwLeft > 0)
