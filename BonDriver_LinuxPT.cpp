@@ -469,6 +469,8 @@ LPCTSTR cBonDriverLinuxPT::EnumChannelName(const DWORD dwSpace, const DWORD dwCh
 
 const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
+	if (!m_bTuner)
+		return FALSE;
 	if (dwSpace != 0)
 		return FALSE;
 	if (dwChannel >= MAX_CH)

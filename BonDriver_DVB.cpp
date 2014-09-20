@@ -87,7 +87,7 @@ static int Init()
 	}
 
 	int idx = 0;
-	BOOL bdFlag = FALSE;
+	BOOL baFlag = FALSE;
 	BOOL blFlag = FALSE;
 	BOOL bsFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
@@ -103,10 +103,10 @@ static int Init()
 			idx = 0;
 		else if ((idx != 1) && IsTagMatch(buf, "#ISDB_T", NULL))
 			idx = 1;
-		else if (!bdFlag && IsTagMatch(buf, "#ADAPTER_NO", &p))
+		else if (!baFlag && IsTagMatch(buf, "#ADAPTER_NO", &p))
 		{
 			g_AdapterNo = ::atoi(p);
-			bdFlag = TRUE;
+			baFlag = TRUE;
 		}
 		else if (!blFlag && IsTagMatch(buf, "#USELNB", &p))
 		{
@@ -284,10 +284,10 @@ extern "C" IBonDriver *CreateBonDriver()
 	}
 
 	// 複数読み込み禁止
-	cBonDriverDVB *pLinuxPT = NULL;
+	cBonDriverDVB *pDVB = NULL;
 	if (cBonDriverDVB::m_spThis == NULL)
-		pLinuxPT = new cBonDriverDVB();
-	return pLinuxPT;
+		pDVB = new cBonDriverDVB();
+	return pDVB;
 }
 
 cBonDriverDVB::cBonDriverDVB() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_m), m_StopTsSplit(m_c, m_m)
@@ -434,7 +434,7 @@ void cBonDriverDVB::CloseTuner(void)
 		{
 			dtv_property prop[1];
 			prop[0].cmd = DTV_VOLTAGE;
-			prop[0].u.data = SEC_VOLTAGE_18;
+			prop[0].u.data = SEC_VOLTAGE_OFF;
 
 			dtv_properties props;
 //			::memset(&props, 0, sizeof(props));
@@ -547,6 +547,8 @@ const BOOL cBonDriverDVB::IsTunerOpening(void)
 
 LPCTSTR cBonDriverDVB::EnumTuningSpace(const DWORD dwSpace)
 {
+	if (!m_bTuner)
+		return NULL;
 	if (dwSpace != 0)
 		return NULL;
 	return (LPCTSTR)g_strSpace;
@@ -554,6 +556,8 @@ LPCTSTR cBonDriverDVB::EnumTuningSpace(const DWORD dwSpace)
 
 LPCTSTR cBonDriverDVB::EnumChannelName(const DWORD dwSpace, const DWORD dwChannel)
 {
+	if (!m_bTuner)
+		return NULL;
 	if (dwSpace != 0)
 		return NULL;
 	if (dwChannel >= MAX_CH)
@@ -563,8 +567,16 @@ LPCTSTR cBonDriverDVB::EnumChannelName(const DWORD dwSpace, const DWORD dwChanne
 	return (LPCTSTR)(g_stChannels[g_Type][dwChannel].strChName);
 }
 
+// 経緯的にはDTV_ISDBS_TS_IDがDTV_STREAM_IDに置き換わり、その際にDTV_ISDBS_TS_ID_LEGACYが
+// 追加されたらしいので、多分これで大丈夫…
+#ifndef DTV_STREAM_ID
+#define DTV_STREAM_ID		DTV_ISDBS_TS_ID
+#endif
+
 const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
+	if (!m_bTuner)
+		return FALSE;
 	if (dwSpace != 0)
 		return FALSE;
 	if (dwChannel >= MAX_CH)
@@ -623,7 +635,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 			if (::ioctl(m_fefd, FE_READ_STATUS, &status) < 0)
 			{
 				::fprintf(stderr, "SetChannel() ioctl(FE_READ_STATUS) error: adapter%d\n", g_AdapterNo);
-				break;
+				return FALSE;
 			}
 			if (status & FE_HAS_LOCK)
 			{
@@ -671,9 +683,9 @@ const DWORD cBonDriverDVB::GetCurChannel(void)
 
 void *cBonDriverDVB::TsReader(LPVOID pv)
 {
-	cBonDriverDVB *pLinuxPT = static_cast<cBonDriverDVB *>(pv);
+	cBonDriverDVB *pDVB = static_cast<cBonDriverDVB *>(pv);
 	DWORD now, before = 0;
-	DWORD &ret = pLinuxPT->m_tRet;
+	DWORD &ret = pDVB->m_tRet;
 	ret = 300;
 	BYTE *pBuf, *pTsBuf;
 	timeval tv;
@@ -682,7 +694,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 
 	if (g_UseServiceID)
 	{
-		if (::pthread_create(&(pLinuxPT->m_hTsSplit), NULL, cBonDriverDVB::TsSplitter, pLinuxPT))
+		if (::pthread_create(&(pDVB->m_hTsSplit), NULL, cBonDriverDVB::TsSplitter, pDVB))
 		{
 			::perror("pthread_create2");
 			ret = 301;
@@ -696,7 +708,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 	// TS読み込みループ
 	pTsBuf = new BYTE[TS_BUFSIZE];
 	pos = 0;
-	while (!pLinuxPT->m_bStopTsRead)
+	while (!pDVB->m_bStopTsRead)
 	{
 		::gettimeofday(&tv, NULL);
 		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
@@ -704,7 +716,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 		{
 			float f = 0;
 			int16_t signal;
-			if (::ioctl(pLinuxPT->m_fefd, FE_READ_SIGNAL_STRENGTH, &signal) < 0)
+			if (::ioctl(pDVB->m_fefd, FE_READ_SIGNAL_STRENGTH, &signal) < 0)
 				::fprintf(stderr, "TsReader() ioctl(FE_READ_SIGNAL_STRENGTH) error: adapter%d\n", g_AdapterNo);
 			else
 			{
@@ -713,12 +725,12 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 				else
 					f = GetSignalLevel_T(signal);
 			}
-			pLinuxPT->m_fSignalLevel = f;
+			pDVB->m_fSignalLevel = f;
 			before = now;
 		}
 
 		pBuf = pTsBuf + pos;
-		if ((len = ::read(pLinuxPT->m_dvrfd, pBuf, TS_BUFSIZE - pos)) <= 0)
+		if ((len = ::read(pDVB->m_dvrfd, pBuf, TS_BUFSIZE - pos)) <= 0)
 		{
 			::nanosleep(&ts, NULL);
 			continue;
@@ -732,9 +744,9 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 			pData->dwSize = TS_BUFSIZE;
 			pData->pbBuf = pTsBuf;
 			if (g_UseServiceID)
-				pLinuxPT->m_fifoRawTS.Push(pData);
+				pDVB->m_fifoRawTS.Push(pData);
 			else
-				pLinuxPT->m_fifoTS.Push(pData);
+				pDVB->m_fifoTS.Push(pData);
 			pTsBuf = new BYTE[TS_BUFSIZE];
 			pos = 0;
 		}
@@ -743,10 +755,10 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 
 	if (g_UseServiceID)
 	{
-		pLinuxPT->m_StopTsSplit.Set();
-		::pthread_join(pLinuxPT->m_hTsSplit, NULL);
-		pLinuxPT->m_hTsSplit = 0;
-		pLinuxPT->m_StopTsSplit.Reset();
+		pDVB->m_StopTsSplit.Set();
+		::pthread_join(pDVB->m_hTsSplit, NULL);
+		pDVB->m_hTsSplit = 0;
+		pDVB->m_StopTsSplit.Reset();
 	}
 	return &ret;
 }
@@ -762,7 +774,7 @@ struct pid_set {
 
 void *cBonDriverDVB::TsSplitter(LPVOID pv)
 {
-	cBonDriverDVB *pLinuxPT = static_cast<cBonDriverDVB *>(pv);
+	cBonDriverDVB *pDVB = static_cast<cBonDriverDVB *>(pv);
 	BYTE *pTsBuf, pPAT[TS_PKTSIZE];
 	BYTE pPMT[4104+TS_PKTSIZE];	// 4104 = 8(TSヘッダ + pointer_field + table_idからsection_length) + 4096(セクション長最大値)
 	int pos;
@@ -779,7 +791,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 	bChangePMT = bSplitPMT = FALSE;
 	PID_ZERO(&pids);
 
-	cEvent *h[2] = { &(pLinuxPT->m_StopTsSplit), pLinuxPT->m_fifoRawTS.GetEventHandle() };
+	cEvent *h[2] = { &(pDVB->m_StopTsSplit), pDVB->m_fifoRawTS.GetEventHandle() };
 	while (1)
 	{
 		DWORD dwRet = cEvent::MultipleWait(2, h);
@@ -791,7 +803,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 		case WAIT_OBJECT_0 + 1:
 		{
 			TS_DATA *pRawBuf = NULL;
-			pLinuxPT->m_fifoRawTS.Pop(&pRawBuf);
+			pDVB->m_fifoRawTS.Pop(&pRawBuf);
 			if (pRawBuf == NULL)	// イベントのトリガからPop()までの間に別スレッドにFlush()される可能性はゼロではない
 				break;
 			BYTE *pSrc = pRawBuf->pbBuf;
@@ -813,7 +825,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 						while ((len >= 4) && ((off + 4) < TS_PKTSIZE))
 						{
 							unsigned short sid = GetSID(&pSrc[off]);
-							if (pLinuxPT->m_dwServiceID == sid)
+							if (pDVB->m_dwServiceID == sid)
 							{
 								pid = GetPID(&pSrc[off+2]);
 								break;
@@ -1109,7 +1121,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					TS_DATA *pData = new TS_DATA();
 					pData->dwSize = TS_BUFSIZE;
 					pData->pbBuf = pTsBuf;
-					pLinuxPT->m_fifoTS.Push(pData);
+					pDVB->m_fifoTS.Push(pData);
 					pTsBuf = new BYTE[TS_BUFSIZE];
 					pos = 0;
 				}
