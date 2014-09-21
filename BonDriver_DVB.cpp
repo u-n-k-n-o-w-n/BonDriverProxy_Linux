@@ -1,13 +1,12 @@
 #include "BonDriver_DVB.h"
 
-//#define USE_READ_SNR
-
 namespace BonDriver_DVB {
 
 static char g_strSpace[32];
 static stChannel g_stChannels[2][MAX_CH];
 static int g_AdapterNo;
-static int g_Type;		// 0 : ISDB_S / 1 : ISDB_T  <-  判定はm_fefdにioctl()かけるまで保留
+static int g_Type;			// 0 : ISDB_S / 1 : ISDB_T  <-  判定はm_fefdにioctl()かけるまで保留
+static BOOL g_UseReadSnr;	// 0 : FE_READ_SIGNAL_STRENGTH / 1 : FE_READ_SNR
 static BOOL g_UseLNB;
 static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
@@ -90,6 +89,7 @@ static int Init()
 
 	int idx = 0;
 	BOOL baFlag = FALSE;
+	BOOL brFlag = FALSE;
 	BOOL blFlag = FALSE;
 	BOOL bsFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
@@ -109,6 +109,11 @@ static int Init()
 		{
 			g_AdapterNo = ::atoi(p);
 			baFlag = TRUE;
+		}
+		else if (!brFlag && IsTagMatch(buf, "#USEREADSNR", &p))
+		{
+			g_UseReadSnr = ::atoi(p);
+			brFlag = TRUE;
 		}
 		else if (!blFlag && IsTagMatch(buf, "#USELNB", &p))
 		{
@@ -178,8 +183,6 @@ static int Init()
 	return 0;
 }
 
-#ifndef USE_READ_SNR
-
 static float GetSignalLevel_S(int16_t signal)
 {
 	static const float fLevelTable[] = {
@@ -242,8 +245,6 @@ static float GetSignalLevel_T(int16_t signal)
 	double P = ::log10(5505024 / (double)signal) * 10;
 	return (float)((0.000024 * P * P * P * P) - (0.0016 * P * P * P) + (0.0398 * P * P) + (0.5491 * P) + 3.0965);
 }
-
-#endif
 
 static unsigned int GetFrequency_S(int ch)
 {
@@ -729,24 +730,27 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 		if ((now - before) >= 1000)
 		{
 			float f = 0;
-#ifdef USE_READ_SNR
-			int16_t cnr;
-			if (::ioctl(pDVB->m_fefd, FE_READ_SNR, &cnr) < 0)
-				::fprintf(stderr, "TsReader() ioctl(FE_READ_SNR) error: adapter%d\n", g_AdapterNo);
-			else
-				f = (float)cnr / 1000;
-#else
-			int16_t signal;
-			if (::ioctl(pDVB->m_fefd, FE_READ_SIGNAL_STRENGTH, &signal) < 0)
-				::fprintf(stderr, "TsReader() ioctl(FE_READ_SIGNAL_STRENGTH) error: adapter%d\n", g_AdapterNo);
+			if (g_UseReadSnr)
+			{
+				int16_t cnr;
+				if (::ioctl(pDVB->m_fefd, FE_READ_SNR, &cnr) < 0)
+					::fprintf(stderr, "TsReader() ioctl(FE_READ_SNR) error: adapter%d\n", g_AdapterNo);
+				else
+					f = (float)cnr / 1000;
+			}
 			else
 			{
-				if (g_Type == 0)
-					f = GetSignalLevel_S(signal);
+				int16_t signal;
+				if (::ioctl(pDVB->m_fefd, FE_READ_SIGNAL_STRENGTH, &signal) < 0)
+					::fprintf(stderr, "TsReader() ioctl(FE_READ_SIGNAL_STRENGTH) error: adapter%d\n", g_AdapterNo);
 				else
-					f = GetSignalLevel_T(signal);
+				{
+					if (g_Type == 0)
+						f = GetSignalLevel_S(signal);
+					else
+						f = GetSignalLevel_T(signal);
+				}
 			}
-#endif
 			pDVB->m_fSignalLevel = f;
 			before = now;
 		}
