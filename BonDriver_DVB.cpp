@@ -6,7 +6,7 @@ static char g_strSpace[32];
 static stChannel g_stChannels[2][MAX_CH];
 static int g_AdapterNo;
 static int g_Type;			// 0 : ISDB_S / 1 : ISDB_T  <-  判定はm_fefdにioctl()かけるまで保留
-static BOOL g_UseReadSnr;	// 0 : FE_READ_SIGNAL_STRENGTH / 1 : FE_READ_SNR
+static int g_GetCnrMode;	// 0 : FE_READ_SIGNAL_STRENGTH / 1 : FE_READ_SNR / 2 : DTV_STAT_CNR
 static BOOL g_UseLNB;
 static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
@@ -89,7 +89,7 @@ static int Init()
 
 	int idx = 0;
 	BOOL baFlag = FALSE;
-	BOOL brFlag = FALSE;
+	BOOL bgFlag = FALSE;
 	BOOL blFlag = FALSE;
 	BOOL bsFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
@@ -110,10 +110,10 @@ static int Init()
 			g_AdapterNo = ::atoi(p);
 			baFlag = TRUE;
 		}
-		else if (!brFlag && IsTagMatch(buf, "#USEREADSNR", &p))
+		else if (!bgFlag && IsTagMatch(buf, "#GETCNRMODE", &p))
 		{
-			g_UseReadSnr = ::atoi(p);
-			brFlag = TRUE;
+			g_GetCnrMode = ::atoi(p);
+			bgFlag = TRUE;
 		}
 		else if (!blFlag && IsTagMatch(buf, "#USELNB", &p))
 		{
@@ -730,7 +730,23 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 		if ((now - before) >= 1000)
 		{
 			float f = 0;
-			if (g_UseReadSnr)
+			if (g_GetCnrMode == 2)
+			{
+				dtv_property prop[1];
+//				::memset(prop, 0, sizeof(prop));
+				prop[0].cmd = DTV_STAT_CNR;
+
+				dtv_properties props;
+//				::memset(&props, 0, sizeof(props));
+				props.props = prop;
+				props.num = 1;
+
+				if (::ioctl(pDVB->m_fefd, FE_GET_PROPERTY, &props) < 0)
+					::fprintf(stderr, "TsReader() ioctl(FE_GET_PROPERTY:DTV_STAT_CNR) error: adapter%d\n", g_AdapterNo);
+				else
+					f = (float)prop[0].u.st.stat[0].svalue / 1000;
+			}
+			else if (g_GetCnrMode == 1)
 			{
 				int16_t cnr;
 				if (::ioctl(pDVB->m_fefd, FE_READ_SNR, &cnr) < 0)
