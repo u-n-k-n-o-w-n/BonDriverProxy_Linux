@@ -469,18 +469,19 @@ LPCTSTR cBonDriverLinuxPT::EnumChannelName(const DWORD dwSpace, const DWORD dwCh
 
 const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
+	BOOL bFlag;
 	if (!m_bTuner)
-		return FALSE;
+		goto err;
 	if (dwSpace != 0)
-		return FALSE;
+		goto err;
 	if (dwChannel >= MAX_CH)
-		return FALSE;
+		goto err;
 	if (g_stChannels[g_Type][dwChannel].bUnused)
-		return FALSE;
+		goto err;
 	if (dwChannel == m_dwChannel)
 		return TRUE;
 
-	BOOL bFlag = TRUE;
+	bFlag = TRUE;
 	if (g_UseServiceID)
 	{
 		if (m_dwChannel != 0xff)
@@ -499,7 +500,7 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 		if (::ioctl(m_fd, SET_CHANNEL, &(g_stChannels[g_Type][dwChannel].freq)) < 0)
 		{
 			::fprintf(stderr, "SetChannel() ioctl(SET_CHANNEL) error: %s\n", g_Device);
-			return FALSE;
+			goto err;
 		}
 	}
 
@@ -514,13 +515,16 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 		if (::pthread_create(&m_hTsRead, NULL, cBonDriverLinuxPT::TsReader, this))
 		{
 			::perror("pthread_create1");
-			return FALSE;
+			goto err;
 		}
 	}
 
 	m_dwSpace = dwSpace;
 	m_dwChannel = dwChannel;
 	return TRUE;
+err:
+	m_fCNR = 0;
+	return FALSE;
 }
 
 const DWORD cBonDriverLinuxPT::GetCurSpace(void)

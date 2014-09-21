@@ -582,18 +582,19 @@ LPCTSTR cBonDriverDVB::EnumChannelName(const DWORD dwSpace, const DWORD dwChanne
 
 const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
+	BOOL bFlag;
 	if (!m_bTuner)
-		return FALSE;
+		goto err;
 	if (dwSpace != 0)
-		return FALSE;
+		goto err;
 	if (dwChannel >= MAX_CH)
-		return FALSE;
+		goto err;
 	if (g_stChannels[g_Type][dwChannel].bUnused)
-		return FALSE;
+		goto err;
 	if (dwChannel == m_dwChannel)
 		return TRUE;
 
-	BOOL bFlag = TRUE;
+	bFlag = TRUE;
 	if (g_UseServiceID)
 	{
 		if (m_dwChannel != 0xff)
@@ -637,7 +638,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 		if (::ioctl(m_fefd, FE_SET_PROPERTY, &props) < 0)
 		{
 			::fprintf(stderr, "SetChannel() ioctl(FE_SET_PROPERTY) error: adapter%d\n", g_AdapterNo);
-			return FALSE;
+			goto err;
 		}
 
 		fe_status_t status;
@@ -650,7 +651,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 			if (::ioctl(m_fefd, FE_READ_STATUS, &status) < 0)
 			{
 				::fprintf(stderr, "SetChannel() ioctl(FE_READ_STATUS) error: adapter%d\n", g_AdapterNo);
-				return FALSE;
+				goto err;
 			}
 			if (status & FE_HAS_LOCK)
 			{
@@ -662,7 +663,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 		if (!bOk)
 		{
 			::fprintf(stderr, "SetChannel() timeout: adapter%d\n", g_AdapterNo);
-			return FALSE;
+			goto err;
 		}
 	}
 
@@ -677,13 +678,16 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 		if (::pthread_create(&m_hTsRead, NULL, cBonDriverDVB::TsReader, this))
 		{
 			::perror("pthread_create1");
-			return FALSE;
+			goto err;
 		}
 	}
 
 	m_dwSpace = dwSpace;
 	m_dwChannel = dwChannel;
 	return TRUE;
+err:
+	m_fCNR = 0;
+	return FALSE;
 }
 
 const DWORD cBonDriverDVB::GetCurSpace(void)

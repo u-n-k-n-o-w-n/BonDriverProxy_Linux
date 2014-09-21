@@ -805,7 +805,7 @@ LPCTSTR cProxyClient::EnumChannelName(const DWORD dwSpace, const DWORD dwChannel
 const BOOL cProxyClient::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 {
 	if (!m_bTuner)
-		return FALSE;
+		goto err;
 //	if ((m_dwSpace == dwSpace) && (m_dwChannel == dwChannel))
 //		return TRUE;
 	makePacket(eSetChannel2, dwSpace, dwChannel, g_ChannelLock);
@@ -817,7 +817,6 @@ const BOOL cProxyClient::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 	}
 	else
 		dw = 0xff;
-	BOOL b;
 	switch (dw)
 	{
 	case 0x00:	// 成功
@@ -828,13 +827,13 @@ const BOOL cProxyClient::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 		m_dwChannel = dwChannel;
 	}
 	case 0x01:	// fall-through / チャンネルロックされてる
-		b = TRUE;
-		break;
+		return TRUE;
 	default:
-		b = FALSE;
 		break;
 	}
-	return b;
+err:
+	m_fSignalLevel = 0;
+	return FALSE;
 }
 
 const DWORD cProxyClient::GetCurSpace(void)
