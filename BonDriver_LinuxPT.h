@@ -252,7 +252,7 @@ class cBonDriverLinuxPT : public IBonDriver2 {
 	cCriticalSection m_writeLock;
 	char m_TunerName[64];
 	BOOL m_bTuner;
-	float m_fSignalLevel;
+	float m_fCNR;
 	DWORD m_dwSpace;
 	DWORD m_dwChannel;
 	DWORD m_dwServiceID;

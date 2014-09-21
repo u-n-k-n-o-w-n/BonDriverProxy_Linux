@@ -183,7 +183,7 @@ static int Init()
 	return 0;
 }
 
-static float GetSignalLevel_S(int16_t signal)
+static float CalcCNR_S(int16_t signal)
 {
 	static const float fLevelTable[] = {
 		24.07f,	// 00	00	  0			24.07dB
@@ -240,7 +240,7 @@ static float GetSignalLevel_S(int16_t signal)
 	}
 }
 
-static float GetSignalLevel_T(int16_t signal)
+static float CalcCNR_T(int16_t signal)
 {
 	double P = ::log10(5505024 / (double)signal) * 10;
 	return (float)((0.000024 * P * P * P * P) - (0.0016 * P * P * P) + (0.0398 * P * P) + (0.5491 * P) + 3.0965);
@@ -303,7 +303,7 @@ cBonDriverDVB::cBonDriverDVB() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_m), m_St
 	Convert((char *)TUNER_NAME, m_TunerName, sizeof(m_TunerName));
 	m_LastBuf = NULL;
 	m_bTuner = FALSE;
-	m_fSignalLevel = 0;
+	m_fCNR = 0;
 	m_dwSpace = m_dwChannel = 0xff;
 	m_dwServiceID = 0xffffffff;
 	m_fefd = m_dmxfd = m_dvrfd = -1;
@@ -466,7 +466,7 @@ const BOOL cBonDriverDVB::SetChannel(const BYTE bCh)
 
 const float cBonDriverDVB::GetSignalLevel(void)
 {
-	return m_fSignalLevel;
+	return m_fCNR;
 }
 
 const DWORD cBonDriverDVB::WaitTsStream(const DWORD dwTimeOut)
@@ -762,12 +762,12 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 				else
 				{
 					if (g_Type == 0)
-						f = GetSignalLevel_S(signal);
+						f = CalcCNR_S(signal);
 					else
-						f = GetSignalLevel_T(signal);
+						f = CalcCNR_T(signal);
 				}
 			}
-			pDVB->m_fSignalLevel = f;
+			pDVB->m_fCNR = f;
 			before = now;
 		}
 
