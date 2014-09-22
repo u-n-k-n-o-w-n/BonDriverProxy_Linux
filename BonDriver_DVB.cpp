@@ -646,7 +646,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 		ts.tv_sec = 0;
 		ts.tv_nsec = 250 * 1000 * 1000;	// 250ms
 		BOOL bOk = FALSE;
-		for (int i = 0; i < 4; i++)	// 250ms * 4で最大1秒待つ
+		for (int i = 0; i < 12; i++)	// 250ms * 12で最大3秒待つ
 		{
 			if (::ioctl(m_fefd, FE_READ_STATUS, &status) < 0)
 			{
