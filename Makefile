@@ -8,14 +8,22 @@ SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp BonDriver_DV
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
 	CXX = clang++
-	CXXFLAGS = -Wall -O2
+	CXXFLAGS = -Wall
 	SOFLAGS = -dynamiclib
 	EXT = dylib
 else
 	CXX = g++
-	CXXFLAGS = -Wall -O2 -pthread
+	CXXFLAGS = -Wall -pthread
 	SOFLAGS = -shared
 	EXT = so
+endif
+
+ifeq ($(BUILD), DEBUG)
+	CPPFLAGS = -DDEBUG
+	CXXFLAGS += -g -O0
+else
+	CPPFLAGS = -DNDEBUG
+	CXXFLAGS += -O2
 endif
 
 all: server client driver
@@ -45,15 +53,15 @@ endif
 
 %.$(EXT).o: %.cpp .depend
 ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) -pthread -fPIC -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -fPIC -c -o $@ $<
 else
-	$(CXX) $(CXXFLAGS) -fPIC -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -fPIC -c -o $@ $<
 endif
 %.o: %.cpp .depend
 ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) -pthread -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -c -o $@ $<
 else
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 endif
 
 clean:
