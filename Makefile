@@ -1,13 +1,20 @@
 .PHONY: all clean distclean dep depend server client driver util
 
+include Makefile.in
+
 SRCDIR = .
 LDFLAGS =
 LIBS = -ldl
-SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp BonDriver_DVB.cpp sample.cpp
+SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp sample.cpp
+ifneq ($(UNAME), Darwin)
+	SRCS += BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
+endif
 
-include Makefile.in
-
+ifeq ($(UNAME), Darwin)
+all: server client sample util
+else
 all: server client driver sample util
+endif
 server: BonDriverProxy
 client: BonDriver_Proxy.$(EXT)
 driver: BonDriver_LinuxPT.$(EXT) BonDriver_DVB.$(EXT)
