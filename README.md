@@ -2,8 +2,8 @@
 
 ## これは何？
 
-BonDriverProxyをUnix系の環境での使用の為にpthreadで再実装した物と、Linux + PTシリーズ用のBonDriverです。
-動作はUbuntu 14.04 + PT3(ドライバ:[m-tsudo/pt3](https://github.com/m-tsudo/pt3))で確認しています(※ドライバ使用の為、改変版pt1_ioctl.hをincludeしています)。
+BonDriverProxyをUnix系の環境での使用の為にpthreadで再実装した物と、Linux用のBonDriverです。
+動作は主にUbuntu 14.04 + PT3(ドライバ:[m-tsudo/pt3](https://github.com/m-tsudo/pt3))で確認しています(※ドライバ使用の為、改変版pt1_ioctl.hをincludeしています)。
 主な用途としては、WindowsのTVTestからLinuxの録画サーバのチューナを使用して視聴、と言う様な感じです。
 
 また、現状Unix系の環境ではBonDriverと言うインタフェースを利用しているソフトは無いかもしれませんが、あって困る事は無いだろ、
@@ -50,7 +50,7 @@ make client
 となります。
 使用方法や設定内容はWindows版BonDriverProxyと同じですが、行頭「;」の行はコメント行になります。
 
-## Linux + PTシリーズ用BonDriver
+## chardev版 / DVB版 BonDriver
 
 ソースディレクトリで、
 
@@ -61,13 +61,19 @@ make driver
 でコンパイルできます。
 設定ファイルの名称と設置場所ルールは上記クライアントモジュールと同じで、行頭「;」の行がコメント行になるのも同じです。
 デバイスの数だけモジュールをコピーして使用します。
-必要な変更事項は、
+必要な変更事項は、chardev版の場合は、
 
 ```
 #DEVICE=/dev/pt3video0
 ```
 
-のデバイスパスをモジュール毎に被らないように変更するのと、必要であれば、
+のデバイスパスを、DVB版の場合は、
+
+```
+#ADAPTER_NO=0
+```
+
+のアダプタNoをモジュール毎に被らないように変更するのと、必要であれば、
 
 ```
 #USELNB=0
@@ -88,9 +94,9 @@ PMT、CAT、NIT、SDT、EIT、TOT、CDTの各PSI/SIと、ECM、EMM、それに�
 また、同じトラポンに含まれる別サービスがBonDriverのチャンネルとして別チャンネル扱いになる為、BonDriverProxy経由で使用する場合、
 通常モードでは可能な、2クライアントが1チューナを共有して、例えばそれぞれフジテレビONEとフジテレビNEXTを視聴する、と言うような事が出来なくなります。
 代わりに、対象サービス以外のデータが流れなくなる為、ネットワークトラフィックが減るのと、(主にCS放送などで)取得したTSストリームをそのままデスクランブルに回した場合のCASカードの処理能力に余裕ができる事になるでしょう。  
-なお、必然的にチャンネルの設定がかなり変わるので、こちらのモード用の設定ファイルはBonDriver_LinuxPT_UseServiceID.confの方をテンプレとして使用するのが良いかと思います。
+なお、必然的にチャンネルの設定がかなり変わるので、こちらのモード用の設定ファイルはBonDriver_(LinuxPT/DVB)_UseServiceID.confの方をテンプレとして使用するのが良いかと思います。
 
-PT3が一枚刺さっている環境で、`/home/unknown/work`にモジュールを設置するとすると、
+PT3が一枚刺さっている環境で、`/home/unknown/work`にchardev版モジュールを#USESERVICEID=0で設置するとすると、
 
 ```
 // /home/unknown/workの内容
@@ -139,6 +145,9 @@ LICENSE参照。
 Jun/18/2014 unknown <unknown_@live.jp>
 
 ## 更新履歴
+
+* version 1.1.5.0 (Sep/28/2014)
+	* DVB版ドライバモジュールを追加
 
 * version 1.1.4.7 (Sep/19/2014)
 	* 1サービス1チャンネルモードの際に、チャンネル変更でのTSデータパージ時に解除しておくべきイベントを  
