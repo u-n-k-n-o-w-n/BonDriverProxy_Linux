@@ -183,64 +183,33 @@ static int Init()
 	return 0;
 }
 
-static float CalcCNR_S(int16_t signal)
+static float CalcCNR_S(uint16_t signal)
 {
-	static const float fLevelTable[] = {
-		24.07f,	// 00	00	  0			24.07dB
-		24.07f,	// 10	00	  4096		24.07dB
-		18.61f,	// 20	00	  8192		18.61dB
-		15.21f,	// 30	00	  12288		15.21dB
-		12.50f,	// 40	00	  16384		12.50dB
-		10.19f,	// 50	00	  20480		10.19dB
-		8.140f,	// 60	00	  24576		8.140dB
-		6.270f,	// 70	00	  28672		6.270dB
-		4.550f,	// 80	00	  32768		4.550dB
-		3.730f,	// 88	00	  34816		3.730dB
-		3.630f,	// 88	FF	  35071		3.630dB
-		2.940f,	// 90	00	  36864		2.940dB
-		1.420f,	// A0	00	  40960		1.420dB
-		0.000f	// B0	00	  45056		-0.01dB
+	static const float fCnrTable[] = {
+		30.344f,	// 0x0000
+		30.344f,	// 0x1000
+		19.163f,	// 0x2000
+		15.215f,	// 0x3000
+		12.405f,	// 0x4000
+		10.147f,	// 0x5000
+		8.198f,		// 0x6000
+		6.285f,		// 0x7000
+		4.074f,		// 0x8000
+		1.177f,		// 0x9000
+		0.000f		// 0xa000 <- 実際に0になるのは0x9550だが、CNRがこの辺の値での誤差は実用上問題無しと判断
 	};
 
 	unsigned char idx = (signal >> 12) & 0xff;
 	if (idx <= 0x1)
-		return 24.07f;
-	else if (idx >= 0xb)
+		return 30.344f;
+	else if (idx >= 0xa)
 		return 0.0f;
-	else
-	{
-		// 線形補間
-		float wf;
-		unsigned short off = signal & 0x0fff;
-		if (idx == 0x08)
-		{
-			if (off >= 0x08ff)
-			{
-				wf = 1793.0f;
-				idx = 0x0a;
-			}
-			else if (off >= 0x0800)
-			{
-				wf = 255.0f;
-				idx = 0x09;
-			}
-			else
-			{
-				wf = 2048.0f;
-				idx = 0x08;
-			}
-		}
-		else
-		{
-			wf = 4096.0f;
-			if (idx >= 0x09)
-				idx += 2;
-		}
-		return fLevelTable[idx] - (((fLevelTable[idx] - fLevelTable[idx + 1]) / wf) * off);
-	}
+	// 線形補間
+	unsigned short off = signal & 0x0fff;
+	return fCnrTable[idx] - (((fCnrTable[idx] - fCnrTable[idx + 1]) / 4096) * off);
 }
 
-static float CalcCNR_T(int16_t signal)
+static float CalcCNR_T(uint16_t signal)
 {
 	double P = ::log10(5505024 / (double)signal) * 10;
 	return (float)((0.000024 * P * P * P * P) - (0.0016 * P * P * P) + (0.0398 * P * P) + (0.5491 * P) + 3.0965);
