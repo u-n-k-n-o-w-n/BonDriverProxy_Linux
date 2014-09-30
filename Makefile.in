@@ -1,0 +1,21 @@
+UNAME := $(shell uname)
+ifeq ($(UNAME), Darwin)
+	CXX = clang++
+	CXXFLAGS = -Wall
+	SOFLAGS = -dynamiclib
+	EXT = dylib
+else
+	CXX = g++
+	CXXFLAGS = -Wall -pthread
+	SOFLAGS = -shared
+	EXT = so
+endif
+
+ifeq ($(BUILD), DEBUG)
+	CPPFLAGS = -DDEBUG
+	CXXFLAGS += -g -O0
+else
+	CPPFLAGS = -DNDEBUG
+	CXXFLAGS += -O2
+endif
+

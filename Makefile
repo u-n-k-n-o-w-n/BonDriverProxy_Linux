@@ -1,24 +1,20 @@
-.PHONY: all clean distclean dep depend
+.PHONY: all clean distclean dep depend server client driver util
+
+include Makefile.in
 
 SRCDIR = .
 LDFLAGS =
 LIBS = -ldl
-SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
-
-UNAME := $(shell uname)
-ifeq ($(UNAME), Darwin)
-	CXX = clang++
-	CXXFLAGS = -Wall -O2
-	SOFLAGS = -dynamiclib
-	EXT = dylib
-else
-	CXX = g++
-	CXXFLAGS = -Wall -O2 -pthread
-	SOFLAGS = -shared
-	EXT = so
+SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp sample.cpp
+ifneq ($(UNAME), Darwin)
+	SRCS += BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
 endif
 
-all: server client driver
+ifeq ($(UNAME), Darwin)
+all: server client sample util
+else
+all: server client driver sample util
+endif
 server: BonDriverProxy
 client: BonDriver_Proxy.$(EXT)
 driver: BonDriver_LinuxPT.$(EXT) BonDriver_DVB.$(EXT)
@@ -43,21 +39,29 @@ else
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
 endif
 
+sample: sample.o
+	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
+
+util:
+	@cd util; make
+
 %.$(EXT).o: %.cpp .depend
 ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) -pthread -fPIC -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -fPIC -c -o $@ $<
 else
-	$(CXX) $(CXXFLAGS) -fPIC -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -fPIC -c -o $@ $<
 endif
 %.o: %.cpp .depend
 ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) -pthread -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -c -o $@ $<
 else
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 endif
 
 clean:
-	$(RM) *.o *.so *.dylib BonDriverProxy .depend
+	$(RM) *.o *.so *.dylib BonDriverProxy sample .depend
+	$(RM) -r *.dSYM
+	@cd util; make clean
 distclean: clean
 
 dep: .depend
