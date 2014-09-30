@@ -2,20 +2,25 @@ UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
 	CXX = clang++
 	CXXFLAGS = -Wall
+	CFLAGS = -Wall
 	SOFLAGS = -dynamiclib
 	EXT = dylib
+	ADDCOMPILEFLAGS = -pthread
 else
 	CXX = g++
 	CXXFLAGS = -Wall -pthread
+	CFLAGS = -Wall
 	SOFLAGS = -shared
 	EXT = so
+	ADDCOMPILEFLAGS =
 endif
 
 ifeq ($(BUILD), DEBUG)
 	CPPFLAGS = -DDEBUG
 	CXXFLAGS += -g -O0
+	CFLAGS += -g -O0
 else
 	CPPFLAGS = -DNDEBUG
 	CXXFLAGS += -O2
+	CFLAGS += -O2
 endif
-

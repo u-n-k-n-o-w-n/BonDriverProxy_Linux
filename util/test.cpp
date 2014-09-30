@@ -16,8 +16,8 @@ $ g++ -O2 -Wall -rdynamic -pthread -o test test.cpp -ldl
 #include <pthread.h>
 #include <string>
 #include <vector>
-#include "typedef.h"
-#include "IBonDriver2.h"
+#include "../typedef.h"
+#include "../IBonDriver2.h"
 
 static int wfd;
 static volatile BOOL bStop = FALSE;

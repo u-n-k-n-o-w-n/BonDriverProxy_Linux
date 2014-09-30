@@ -5,9 +5,10 @@ include Makefile.in
 SRCDIR = .
 LDFLAGS =
 LIBS = -ldl
-SRCS = BonDriverProxy.cpp BonDriver_Proxy.cpp sample.cpp
+SRCS = BonDriverProxy.cpp sample.cpp
+SOSRCS = BonDriver_Proxy.cpp
 ifneq ($(UNAME), Darwin)
-	SRCS += BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
+	SOSRCS += BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
 endif
 
 ifeq ($(UNAME), Darwin)
@@ -26,18 +27,10 @@ BonDriver_Proxy.$(EXT): BonDriver_Proxy.$(EXT).o
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
 
 BonDriver_LinuxPT.$(EXT): BonDriver_LinuxPT.$(EXT).o
-ifeq ($(UNAME), Darwin)
-	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS) -liconv
-else
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
-endif
 
 BonDriver_DVB.$(EXT): BonDriver_DVB.$(EXT).o
-ifeq ($(UNAME), Darwin)
-	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS) -liconv
-else
 	$(CXX) $(SOFLAGS) $(CXXFLAGS) -o $@ $^ $(LIBS)
-endif
 
 sample: sample.o
 	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
@@ -46,17 +39,10 @@ util:
 	@cd util; make
 
 %.$(EXT).o: %.cpp .depend
-ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -fPIC -c -o $@ $<
-else
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -fPIC -c -o $@ $<
-endif
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(ADDCOMPILEFLAGS) -fPIC -c -o $@ $<
+
 %.o: %.cpp .depend
-ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -c -o $@ $<
-else
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
-endif
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(ADDCOMPILEFLAGS) -c -o $@ $<
 
 clean:
 	$(RM) *.o *.so *.dylib BonDriverProxy sample .depend
@@ -73,4 +59,5 @@ endif
 
 .depend:
 	@$(RM) .depend
-	@$(foreach SRC, $(SRCS:%=$(SRCDIR)/%), $(CXX) $(SRC) $(CXXFLAGS) -g0 -MT $(SRC:$(SRCDIR)/%.cpp=%.o) -MM >> .depend;)
+	@$(foreach SRC, $(SRCS:%=$(SRCDIR)/%), $(CXX) -g0 -MT $(basename $(SRC)).o -MM $(SRC) >> .depend;)
+	@$(foreach SRC, $(SOSRCS:%=$(SRCDIR)/%), $(CXX) -g0 -MT $(basename $(SRC)).$(EXT).o -MM $(SRC) >> .depend;)
