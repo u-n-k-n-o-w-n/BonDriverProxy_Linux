@@ -72,18 +72,15 @@ static int Init()
 	char *p, buf[512];
 
 	Dl_info info;
-	if (::dladdr((void *)Init, &info) != 0)
-	{
-		::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
-		buf[sizeof(buf) - 8] = '\0';
-		::strcat(buf, ".conf");
-	}
-	else
-		::strcpy(buf, DEFAULT_CONF_NAME);
+	if (::dladdr((void *)Init, &info) == 0)
+		return -1;
+	::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
+	buf[sizeof(buf) - 8] = '\0';
+	::strcat(buf, ".conf");
 
 	fp = ::fopen(buf, "r");
 	if (fp == NULL)
-		return -1;
+		return -2;
 	for (int i = 0; i < MAX_CH; i++)
 	{
 		g_stChannels[0][i].bUnused = TRUE;
@@ -132,7 +129,7 @@ static int Init()
 			if (Convert(p, g_strSpace, sizeof(g_strSpace)) < 0)
 			{
 				::fclose(fp);
-				return -2;
+				return -3;
 			}
 			bdFlag = TRUE;
 		}
@@ -187,7 +184,7 @@ static int Init()
 					if (Convert(cp[0], g_stChannels[idx][dw].strChName, MAX_CN_LEN) < 0)
 					{
 						::fclose(fp);
-						return -3;
+						return -4;
 					}
 					g_stChannels[idx][dw].freq.frequencyno = ::atoi(cp[2]);
 					g_stChannels[idx][dw].freq.slot = ::atoi(cp[3]);

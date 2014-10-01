@@ -31,18 +31,15 @@ static int Init()
 	char *p, buf[512];
 
 	Dl_info info;
-	if (::dladdr((void *)Init, &info) != 0)
-	{
-		::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
-		buf[sizeof(buf) - 8] = '\0';
-		::strcat(buf, ".conf");
-	}
-	else
-		::strcpy(buf, DEFAULT_CONF_NAME);
+	if (::dladdr((void *)Init, &info) == 0)
+		return -1;
+	::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
+	buf[sizeof(buf) - 8] = '\0';
+	::strcat(buf, ".conf");
 
 	fp = ::fopen(buf, "r");
 	if (fp == NULL)
-		return -1;
+		return -2;
 
 	BOOL bHost, bPort, bBonDriver, bChannelLock, bConnectTimeOut, bUseMagicPacket;
 	BOOL bTargetHost, bTargetPort, bTargetMac;
@@ -148,12 +145,12 @@ static int Init()
 	::fclose(fp);
 
 	if (!bHost || !bPort || !bBonDriver)
-		return -2;
+		return -3;
 
 	if (g_UseMagicPacket)
 	{
 		if (!bTargetMac)
-			return -3;
+			return -4;
 		if (!bTargetHost)
 			::strcpy(g_TargetHost, g_Host);
 		if (!bTargetPort)

@@ -20,8 +20,6 @@
 
 namespace BonDriver_LinuxPT {
 
-#define DEFAULT_CONF_NAME	"BonDriver_LinuxPT.conf"
-
 #define MAX_CH				128
 #define MAX_CN_LEN			64
 

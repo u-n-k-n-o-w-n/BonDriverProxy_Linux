@@ -18,7 +18,6 @@
 
 namespace BonDriver_Proxy {
 
-#define DEFAULT_CONF_NAME	"BonDriver_Proxy.conf"
 #define TUNER_NAME			"BonDriver_Proxy"
 
 ////////////////////////////////////////////////////////////////////////////////
