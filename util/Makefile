@@ -19,11 +19,7 @@ udpsend: udpsend.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 %.o: %.cpp .depend
-ifeq ($(UNAME), Darwin)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -pthread -c -o $@ $<
-else
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
-endif
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(ADDCOMPILEFLAGS) -c -o $@ $<
 
 %.o: %.c .depend
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
