@@ -7,6 +7,7 @@ static char g_strSpace[32];
 static stChannel g_stChannels[2][MAX_CH];
 static char g_Device[32];
 static int g_Type;		// 0 : ISDB_S / 1 : ISDB_T
+static BOOL g_MustStop;
 static BOOL g_UseLNB;
 static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
@@ -108,6 +109,7 @@ static int Init()
 		{
 			::strncpy(g_Device, p, sizeof(g_Device) - 1);
 			g_Device[sizeof(g_Device) - 1] = '\0';
+			g_MustStop = FALSE;
 			if ((p = ::strstr(g_Device, "video")) != NULL)	// PT
 				g_Type = (::atoi(p + 5) / 2) % 2;
 			else
@@ -117,9 +119,15 @@ static int Init()
 				else if((p = ::strstr(g_Device, "pxq3pe")) != NULL)	// PX-Q3PE
 					g_Type = (::atoi(p + 6) / 2) % 2;
 				else if((p = ::strstr(g_Device, "pxw3u3")) != NULL)	// PX-W3U3
+				{
 					g_Type = ::atoi(p + 6) % 2;
+					g_MustStop = TRUE;
+				}
 				else if((p = ::strstr(g_Device, "pxs3u")) != NULL)	// PX-S3U / PX-S3U2
+				{
 					g_Type = ::atoi(p + 5) % 2;
+					g_MustStop = TRUE;
+				}
 				cBonDriverLinuxPT::m_sbPT = FALSE;
 			}
 			if (g_Type == 0)
@@ -463,6 +471,13 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 
 	if (bFlag)
 	{
+		if (g_MustStop && m_hTsRead)
+		{
+			m_bStopTsRead = TRUE;
+			::pthread_join(m_hTsRead, NULL);
+			m_hTsRead = 0;
+			::ioctl(m_fd, STOP_REC, 0);
+		}
 		if (::ioctl(m_fd, SET_CHANNEL, &(g_stChannels[g_Type][dwChannel].freq)) < 0)
 		{
 			::fprintf(stderr, "SetChannel() ioctl(SET_CHANNEL) error: %s\n", g_Device);
