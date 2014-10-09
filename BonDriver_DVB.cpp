@@ -828,8 +828,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 				unsigned short pid = GetPID(&pSrc[1]);
 				if (pid == 0x0000)	// PAT
 				{
-					// payload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
-					if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
+					// ビットエラー無しかつpayload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
+					if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 					{
 						// section_length
 						// 9 = transport_stream_idからlast_section_numberまでの5バイト + CRC_32の4バイト
@@ -932,8 +932,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 				}
 				else if (pid == 0x0001)	// CAT
 				{
-					// payload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
-					if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
+					// ビットエラー無しかつpayload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
+					if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 					{
 						// version_number
 						unsigned char ver = (pSrc[10] >> 1) & 0x1f;
@@ -983,8 +983,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					{
 						int len;
 						BYTE *p;
-						// payload先頭を待つ(adaptation_fieldは無し、PSIのpointer_fieldは0x00の前提)
-						if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
+						// payload先頭を待つ(ビットエラー無し、adaptation_field無し、PSIのpointer_fieldは0x00の前提)
+						if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 						{
 							// section_length
 							len = (((int)(pSrc[6] & 0x0f) << 8) | pSrc[7]);
@@ -1008,8 +1008,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 						{
 							if (!bSplitPMT)	// 分割PMTの続き待ち中でなければ
 								goto next;
-							// CIが期待している値ではない、もしくはpayloadが無い場合
-							if (((pSrc[3] & 0x0f) != pmt_ci) || !(pSrc[3] & 0x10))
+							// ビットエラー有り、あるいはCIが期待している値ではない、もしくはpayloadが無い場合
+							if ((pSrc[1] & 0x80) || ((pSrc[3] & 0x0f) != pmt_ci) || !(pSrc[3] & 0x10))
 							{
 								// 最初からやり直し
 								bSplitPMT = FALSE;
@@ -1096,10 +1096,40 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 								pid = GetPID(&p[off+1]);
 								PID_SET(pid, &pids);
 							}
-							// ES_info_length + 5(stream_typeからES_info_lengthまでの5バイト)
-							int cdesc_len = (((int)(p[off+3] & 0x0f) << 8) | p[off+4]) + 5;
-							off += cdesc_len;
-							len -= cdesc_len;
+							// ES_info_length
+							desc_len = (((int)(p[off+3] & 0x0f) << 8) | p[off+4]);
+							// 5 = 最初のdescriptorのオフセット
+							int coff = off + 5;
+							left = desc_len;
+							while (left >= 2)
+							{
+								if ((coff + 2) > limit)	// ES_info_length異常
+								{
+									bSplitPMT = FALSE;
+									goto next;
+								}
+								int cdesc_len = 2 + p[coff+1];
+								if (cdesc_len > left || (coff + cdesc_len) > limit)	// descriptor長さ異常
+								{
+									bSplitPMT = FALSE;
+									goto next;
+								}
+								if (p[coff] == 0x09)	// Conditional Access Descriptor
+								{
+									if (p[coff+1] >= 4 && (p[coff+4] & 0xe0) == 0xe0)	// 内容が妥当なら
+									{
+										// ECM PIDセット
+										pid = GetPID(&p[coff+4]);
+										if (pid != 0x1fff)
+											PID_SET(pid, &pids);
+									}
+								}
+								coff += cdesc_len;
+								left -= cdesc_len;
+							}
+							// 5 = stream_typeからES_info_lengthまでの5バイト
+							off += (5 + desc_len);
+							len -= (5 + desc_len);
 						}
 						// PMTが複数パケットに分かれていない場合のみ保存する
 						// 複数パケットに分かれていた場合は今回のPMTは破棄(次回以降のから保存する事になる)
