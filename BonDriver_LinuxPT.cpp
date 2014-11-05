@@ -270,8 +270,7 @@ cBonDriverLinuxPT::cBonDriverLinuxPT() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_
 	m_LastBuf = NULL;
 	m_bTuner = FALSE;
 	m_fCNR = 0;
-	m_dwSpace = m_dwChannel = 0xff;
-	m_dwServiceID = 0xffffffff;
+	m_dwSpace = m_dwChannel = m_dwServiceID = 0xffffffff;
 	m_fd = -1;
 	m_hTsRead = m_hTsSplit = 0;
 	m_bStopTsRead = FALSE;
@@ -458,7 +457,7 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 	bFlag = TRUE;
 	if (g_UseServiceID)
 	{
-		if (m_dwChannel != 0xff)
+		if (m_dwChannel != 0xffffffff)
 		{
 			if ((g_stChannels[g_Type][dwChannel].freq.frequencyno == g_stChannels[g_Type][m_dwChannel].freq.frequencyno) &&
 				(g_stChannels[g_Type][dwChannel].freq.slot == g_stChannels[g_Type][m_dwChannel].freq.slot))
