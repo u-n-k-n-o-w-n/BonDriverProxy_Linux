@@ -898,7 +898,8 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					int limit = 8 + len;
 					// PCR PIDセット
 					pid = GetPID(&p[13]);
-					PID_SET(pid, &pids);
+					if (pid != 0x1fff)
+						PID_SET(pid, &pids);
 					// program_info_length
 					int desc_len = (((int)(p[15] & 0x0f) << 8) | p[16]);
 					// 17 = 最初のdescriptorのオフセット
@@ -921,7 +922,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						{
 							if (p[off+1] >= 4 && (p[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
 							{
-								// ECM PIDセット
+								// ECM PIDセット(第1ループに無効ECMは来ない / ARIB TR-B14/B15)
 								pid = GetPID(&p[off+4]);
 								PID_SET(pid, &pids);
 							}
