@@ -273,7 +273,8 @@ cBonDriverDVB::cBonDriverDVB() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_m), m_St
 	m_LastBuf = NULL;
 	m_bTuner = FALSE;
 	m_fCNR = 0;
-	m_dwSpace = m_dwChannel = m_dwServiceID = 0xffffffff;
+	m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
+	m_dwServiceID = 0xffffffff;
 	m_fefd = m_dmxfd = m_dvrfd = -1;
 	m_hTsRead = m_hTsSplit = 0;
 	m_bStopTsRead = FALSE;
@@ -565,7 +566,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 	bFlag = TRUE;
 	if (g_UseServiceID)
 	{
-		if (m_dwChannel != 0xffffffff)
+		if (m_dwChannel != 0x7fffffff)
 		{
 			if ((g_stChannels[g_Type][dwChannel].freq.frequencyno == g_stChannels[g_Type][m_dwChannel].freq.frequencyno) &&
 				(g_stChannels[g_Type][dwChannel].freq.tsid == g_stChannels[g_Type][m_dwChannel].freq.tsid))
@@ -704,6 +705,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 			float f = 0;
 			if (g_GetCnrMode == 2)
 			{
+#ifdef DTV_STAT_CNR
 				dtv_property prop[1];
 //				::memset(prop, 0, sizeof(prop));
 				prop[0].cmd = DTV_STAT_CNR;
@@ -717,6 +719,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 					::fprintf(stderr, "TsReader() ioctl(FE_GET_PROPERTY:DTV_STAT_CNR) error: adapter%d\n", g_AdapterNo);
 				else
 					f = (float)prop[0].u.st.stat[0].svalue / 1000;
+#endif
 			}
 			else if (g_GetCnrMode == 1)
 			{
