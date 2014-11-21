@@ -29,7 +29,7 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 	m_hModule = NULL;
 	m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
 	m_strBonDriver[0] = '\0';
-	m_bTunerOpen = FALSE;
+	m_bTunerOpen = m_bChannelLock = FALSE;
 	m_hTsRead = 0;
 	m_pTsReceiversList = NULL;
 	m_pStopTsRead = NULL;
@@ -79,16 +79,18 @@ cProxyServer::~cProxyServer()
 	{
 		if (m_hTsRead)
 		{
-			LOCK(*m_pTsLock);
-			it = m_pTsReceiversList->begin();
-			while (it != m_pTsReceiversList->end())
 			{
-				if (*it == this)
+				LOCK(*m_pTsLock);
+				it = m_pTsReceiversList->begin();
+				while (it != m_pTsReceiversList->end())
 				{
-					m_pTsReceiversList->erase(it);
-					break;
+					if (*it == this)
+					{
+						m_pTsReceiversList->erase(it);
+						break;
+					}
+					++it;
 				}
-				++it;
 			}
 			// 可能性は低いがゼロではない…
 			if (m_pTsReceiversList->empty())
@@ -298,12 +300,21 @@ DWORD cProxyServer::Process()
 				{
 					if (m_hTsRead)
 					{
-						LOCK(*m_pTsLock);
-						CloseTuner();
-						*m_ppos = 0;
-						m_bTunerOpen = FALSE;
+						*m_pStopTsRead = TRUE;
+						::pthread_join(m_hTsRead, NULL);
+						m_hTsRead = 0;
+						delete m_pTsReceiversList;
+						m_pTsReceiversList = NULL;
+						delete m_pStopTsRead;
+						m_pStopTsRead = NULL;
+						delete m_pTsLock;
+						m_pTsLock = NULL;
+						delete m_ppos;
+						m_ppos = NULL;
 					}
+					CloseTuner();
 				}
+				m_bTunerOpen = FALSE;
 				break;
 			}
 
