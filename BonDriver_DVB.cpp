@@ -980,27 +980,6 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 							bChangePMT = TRUE;	// PMT更新処理開始
 							bSplitPMT = FALSE;
 							lpmt_version = ver;
-							// PIDマップ初期化
-							PID_ZERO(&pids);
-							// PMT PIDセット(マップにセットしても意味無いけど一応)
-							PID_SET(pidPMT, &pids);
-							// CAT PIDセット(同上)
-							PID_SET(0x0001, &pids);
-							// NIT PIDセット
-							PID_SET(0x0010, &pids);
-							// SDT PIDセット
-							PID_SET(0x0011, &pids);
-							// EIT PIDセット
-							PID_SET(0x0012, &pids);
-							PID_SET(0x0026, &pids);
-							PID_SET(0x0027, &pids);
-							// TOT PIDセット
-							PID_SET(0x0014, &pids);
-							// CDT PIDセット
-							PID_SET(0x0029, &pids);
-							// EMM PIDセット
-							if (pidEMM != 0xffff)
-								PID_SET(pidEMM, &pids);
 						}
 						// PMT更新処理中でなければ何もしない
 						// (バージョンチェックのelseにしないのは、分割PMTの処理中にドロップがあった場合などの為)
@@ -1069,6 +1048,27 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					}
 					// この時点でセクションは必ず揃っている
 					int limit = 8 + len;
+					// PIDマップ初期化
+					PID_ZERO(&pids);
+					// PMT PIDセット(マップにセットしても意味無いけど一応)
+					PID_SET(pidPMT, &pids);
+					// CAT PIDセット(同上)
+					PID_SET(0x0001, &pids);
+					// NIT PIDセット
+					PID_SET(0x0010, &pids);
+					// SDT PIDセット
+					PID_SET(0x0011, &pids);
+					// EIT PIDセット
+					PID_SET(0x0012, &pids);
+					PID_SET(0x0026, &pids);
+					PID_SET(0x0027, &pids);
+					// TOT PIDセット
+					PID_SET(0x0014, &pids);
+					// CDT PIDセット
+					PID_SET(0x0029, &pids);
+					// EMM PIDセット
+					if (pidEMM != 0xffff)
+						PID_SET(pidEMM, &pids);
 					// PCR PIDセット
 					pid = GetPID(&p[13]);
 					if (pid != 0x1fff)
