@@ -275,6 +275,7 @@ cBonDriverLinuxPT::cBonDriverLinuxPT() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_
 	m_fd = -1;
 	m_hTsRead = m_hTsSplit = 0;
 	m_bStopTsRead = FALSE;
+	m_bChannelChanged = FALSE;
 
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -466,6 +467,7 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 				bFlag = FALSE;
 			}
 		}
+		m_bChannelChanged = TRUE;
 		m_dwServiceID = g_stChannels[g_Type][dwChannel].ServiceID;
 	}
 
@@ -504,6 +506,7 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 	m_dwChannel = dwChannel;
 	return TRUE;
 err:
+	m_bChannelChanged = FALSE;
 	m_fCNR = 0;
 	return FALSE;
 }
@@ -611,6 +614,7 @@ end:
 #define PID_SET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] |= (1 << ((pid) % (8 * sizeof(int)))))
 #define PID_CLR(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] &= ~(1 << ((pid) % (8 * sizeof(int)))))
 #define PID_ISSET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] & (1 << ((pid) % (8 * sizeof(int)))))
+#define PID_MERGE(dst, src)	{for(int i=0;i<(MAX_PID / (8 * sizeof(int)));i++){(dst)->bits[i] |= (src)->bits[i];}}
 #define PID_ZERO(map)		(::memset((map), 0 , sizeof(*(map))))
 struct pid_set {
 	int bits[MAX_PID / (8 * sizeof(int))];
@@ -625,7 +629,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 	unsigned char pat_ci, pmt_ci, lpmt_version, lcat_version;
 	unsigned short ltsid, pidPMT, pidEMM, pmt_tail;
 	BOOL bChangePMT, bSplitPMT;
-	pid_set pids;
+	pid_set pids, save_pids[2], *p_new_pids, *p_old_pids;
 
 	pTsBuf = new BYTE[TS_BUFSIZE];
 	pos = 0;
@@ -634,6 +638,10 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 	ltsid = pidPMT = pidEMM = 0xffff;	// 現在のTSID及びPMT,EMMのPID
 	bChangePMT = bSplitPMT = FALSE;
 	PID_ZERO(&pids);
+	p_new_pids = &save_pids[0];
+	p_old_pids = &save_pids[1];
+	PID_ZERO(p_new_pids);
+	PID_ZERO(p_old_pids);
 
 	cEvent *h[2] = { &(pLinuxPT->m_StopTsSplit), pLinuxPT->m_fifoRawTS.GetEventHandle() };
 	while (1)
@@ -875,31 +883,31 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					}
 					// この時点でセクションは必ず揃っている
 					int limit = 8 + len;
-					// PIDマップ初期化
-					PID_ZERO(&pids);
+					// 新PIDマップ初期化
+					PID_ZERO(p_new_pids);
 					// PMT PIDセット(マップにセットしても意味無いけど一応)
-					PID_SET(pidPMT, &pids);
+					PID_SET(pidPMT, p_new_pids);
 					// CAT PIDセット(同上)
-					PID_SET(0x0001, &pids);
+					PID_SET(0x0001, p_new_pids);
 					// NIT PIDセット
-					PID_SET(0x0010, &pids);
+					PID_SET(0x0010, p_new_pids);
 					// SDT PIDセット
-					PID_SET(0x0011, &pids);
+					PID_SET(0x0011, p_new_pids);
 					// EIT PIDセット
-					PID_SET(0x0012, &pids);
-					PID_SET(0x0026, &pids);
-					PID_SET(0x0027, &pids);
+					PID_SET(0x0012, p_new_pids);
+					PID_SET(0x0026, p_new_pids);
+					PID_SET(0x0027, p_new_pids);
 					// TOT PIDセット
-					PID_SET(0x0014, &pids);
+					PID_SET(0x0014, p_new_pids);
 					// CDT PIDセット
-					PID_SET(0x0029, &pids);
+					PID_SET(0x0029, p_new_pids);
 					// EMM PIDセット
 					if (pidEMM != 0xffff)
-						PID_SET(pidEMM, &pids);
+						PID_SET(pidEMM, p_new_pids);
 					// PCR PIDセット
 					pid = GetPID(&p[13]);
 					if (pid != 0x1fff)
-						PID_SET(pid, &pids);
+						PID_SET(pid, p_new_pids);
 					// program_info_length
 					int desc_len = (((int)(p[15] & 0x0f) << 8) | p[16]);
 					// 17 = 最初のdescriptorのオフセット
@@ -924,7 +932,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							{
 								// ECM PIDセット(第1ループに無効ECMは来ない / ARIB TR-B14/B15)
 								pid = GetPID(&p[off+4]);
-								PID_SET(pid, &pids);
+								PID_SET(pid, p_new_pids);
 							}
 						}
 						off += cdesc_len;
@@ -944,7 +952,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
 						{
 							pid = GetPID(&p[off+1]);
-							PID_SET(pid, &pids);
+							PID_SET(pid, p_new_pids);
 						}
 						// ES_info_length
 						desc_len = (((int)(p[off+3] & 0x0f) << 8) | p[off+4]);
@@ -971,7 +979,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 									// ECM PIDセット
 									pid = GetPID(&p[coff+4]);
 									if (pid != 0x1fff)
-										PID_SET(pid, &pids);
+										PID_SET(pid, p_new_pids);
 								}
 							}
 							coff += cdesc_len;
@@ -981,8 +989,35 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						off += (5 + desc_len);
 						len -= (5 + desc_len);
 					}
-					// PMT更新処理完了
-					bChangePMT = bSplitPMT = FALSE;
+					// section_length
+					len = (((int)(p[6] & 0x0f) << 8) | p[7]);
+					// CRC_32チェック
+					// 3 = table_idからsection_lengthまでの3バイト
+					if (CalcCRC32(&p[5], len + 3) == 0)
+					{
+						// 新PIDマップを適用
+						memcpy(&pids, p_new_pids, sizeof(pids));
+						// チャンネル変更でなければ
+						if (!pLinuxPT->m_bChannelChanged)
+						{
+							// 旧PIDマップをマージ
+							PID_MERGE(&pids, p_old_pids);
+						}
+						else
+							pLinuxPT->m_bChannelChanged = FALSE;
+						// 次回は今回のPMTで示されたPIDを旧PIDマップとする
+						pid_set *p_tmp_pids;
+						p_tmp_pids = p_old_pids;
+						p_old_pids = p_new_pids;
+						p_new_pids = p_tmp_pids;
+						// PMT更新処理完了
+						bChangePMT = bSplitPMT = FALSE;
+					}
+					else
+					{
+						// CRC_32チェックエラーなので最初からやり直し
+						bSplitPMT = FALSE;
+					}
 				}
 				else
 				{

@@ -260,6 +260,7 @@ class cBonDriverLinuxPT : public IBonDriver2 {
 	DWORD m_tRet;
 	volatile BOOL m_bStopTsRead;
 	cEvent m_StopTsSplit;
+	BOOL m_bChannelChanged;
 
 	void TsFlush(BOOL bUseServiceID)
 	{
