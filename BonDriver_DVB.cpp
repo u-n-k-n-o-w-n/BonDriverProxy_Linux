@@ -10,6 +10,7 @@ static int g_GetCnrMode;	// 0 : FE_READ_SIGNAL_STRENGTH / 1 : FE_READ_SNR / 2 : 
 static BOOL g_UseLNB;
 static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
+static BOOL g_ModPMT;
 
 static int Convert(char *src, char *dst, size_t dstsize)
 {
@@ -92,6 +93,7 @@ static int Init()
 	BOOL bgFlag = FALSE;
 	BOOL blFlag = FALSE;
 	BOOL bsFlag = FALSE;
+	BOOL bmFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
@@ -124,6 +126,11 @@ static int Init()
 		{
 			g_UseServiceID = ::atoi(p);
 			bsFlag = TRUE;
+		}
+		else if (!bmFlag && IsTagMatch(buf, "#MODPMT", &p))
+		{
+			g_ModPMT = ::atoi(p);
+			bmFlag = TRUE;
 		}
 		else
 		{
@@ -787,7 +794,7 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 #define PID_SET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] |= (1 << ((pid) % (8 * sizeof(int)))))
 #define PID_CLR(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] &= ~(1 << ((pid) % (8 * sizeof(int)))))
 #define PID_ISSET(pid, map)	((map)->bits[(pid) / (8 * sizeof(int))] & (1 << ((pid) % (8 * sizeof(int)))))
-#define PID_MERGE(dst, src)	{for(int i=0;i<(MAX_PID / (8 * sizeof(int)));i++){(dst)->bits[i] |= (src)->bits[i];}}
+#define PID_MERGE(dst, src)	{for(int i=0;i<(int)(MAX_PID / (8 * sizeof(int)));i++){(dst)->bits[i] |= (src)->bits[i];}}
 #define PID_ZERO(map)		(::memset((map), 0 , sizeof(*(map))))
 struct pid_set {
 	int bits[MAX_PID / (8 * sizeof(int))];
@@ -798,18 +805,19 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 	cBonDriverDVB *pDVB = static_cast<cBonDriverDVB *>(pv);
 	BYTE *pTsBuf, pPAT[TS_PKTSIZE];
 	BYTE pPMT[4104+TS_PKTSIZE];	// 4104 = 8(TSヘッダ + pointer_field + table_idからsection_length) + 4096(セクション長最大値)
-	int pos;
-	unsigned char pat_ci, pmt_ci, lpmt_version, lcat_version;
+	BYTE pPMTPackets[TS_PKTSIZE*32];
+	int pos, iNumSplit;
+	unsigned char pat_ci, rpmt_ci, wpmt_ci, lpmt_version, lcat_version;
 	unsigned short ltsid, pidPMT, pidEMM, pmt_tail;
-	BOOL bChangePMT, bSplitPMT;
+	BOOL bChangePMT, bSplitPMT, bPMTComplete;
 	pid_set pids, save_pids[2], *p_new_pids, *p_old_pids;
 
 	pTsBuf = new BYTE[TS_BUFSIZE];
 	pos = 0;
 	pat_ci = 0x10;						// 0x1(payloadのみ) << 4 | 0x0(ci初期値)
-	lpmt_version = lcat_version = 0xff;
+	lpmt_version = lcat_version = wpmt_ci = 0xff;
 	ltsid = pidPMT = pidEMM = 0xffff;	// 現在のTSID及びPMT,EMMのPID
-	bChangePMT = bSplitPMT = FALSE;
+	bChangePMT = bSplitPMT = bPMTComplete = FALSE;
 	PID_ZERO(&pids);
 	p_new_pids = &save_pids[0];
 	p_old_pids = &save_pids[1];
@@ -906,6 +914,10 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 								// PAT更新時には必ずPMT及びCATの更新処理を行う
 								lpmt_version = lcat_version = 0xff;
 								pidEMM = 0xffff;
+								// PATより先に分割PMTの先頭が来ていた場合、そのPMTは破棄
+								bSplitPMT = FALSE;
+								// なんとなく
+								wpmt_ci = 0xff;
 							}
 							else
 							{
@@ -972,9 +984,14 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					// ビットエラーがあったら無視
 					if (pSrc[1] & 0x80)
 						goto next;
-					// 無かった場合はとりあえずコピーしてしまう
-					::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
-					pos += TS_PKTSIZE;
+
+					// 分割PMTをまとめる必要が無ければ
+					if (!g_ModPMT)
+					{
+						// とりあえずコピーしてしまう
+						::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
+						pos += TS_PKTSIZE;
+					}
 
 					int len;
 					BYTE *p;
@@ -988,11 +1005,60 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 							bChangePMT = TRUE;	// PMT更新処理開始
 							bSplitPMT = FALSE;
 							lpmt_version = ver;
+							// 分割PMTをまとめる場合は
+							if (g_ModPMT)
+							{
+								// 送信用PMTも更新を行う
+								bPMTComplete = FALSE;
+								// 送信用PMT用CI初期値保存
+								if (wpmt_ci == 0xff)
+									wpmt_ci = (pSrc[3] & 0x0f) | 0x10;
+							}
 						}
 						// PMT更新処理中でなければ何もしない
 						// (バージョンチェックのelseにしないのは、分割PMTの処理中にドロップがあった場合などの為)
 						if (!bChangePMT)
+						{
+							// 分割PMTをまとめる場合かつ、送信用PMTができているなら
+							if (g_ModPMT && bPMTComplete)
+							{
+								for (int i = 0; i < iNumSplit; i++)
+								{
+									pPMTPackets[(TS_PKTSIZE * i) + 3] = wpmt_ci;
+									if (wpmt_ci == 0x1f)
+										wpmt_ci = 0x10;
+									else
+										wpmt_ci++;
+								}
+								int sent, left;
+								sent = 0;
+								left = TS_PKTSIZE * iNumSplit;
+								while (1)
+								{
+									if ((pos + left) <= TS_BUFSIZE)
+									{
+										::memcpy(&pTsBuf[pos], &pPMTPackets[sent], left);
+										pos += left;
+										break;
+									}
+									// バッファサイズが足りない場合
+									int diff = (pos + left) - TS_BUFSIZE;
+									// 入るだけ入れて
+									::memcpy(&pTsBuf[pos], &pPMTPackets[sent], (left - diff));
+									// キューに投げ込んでから新たにバッファ確保
+									TS_DATA *pData = new TS_DATA();
+									pData->dwSize = TS_BUFSIZE;
+									pData->pbBuf = pTsBuf;
+									pDVB->m_fifoTS.Push(pData);
+									pTsBuf = new BYTE[TS_BUFSIZE];
+									pos = 0;
+									// 送信済みサイズ及び残りサイズ更新
+									sent += (left - diff);
+									left = diff;
+								}
+							}
 							goto next;
+						}
 						// section_length
 						len = (((int)(pSrc[6] & 0x0f) << 8) | pSrc[7]);
 						if (len > (TS_PKTSIZE - 8))	// TSパケットを跨ってる
@@ -1001,11 +1067,11 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 							// コピーしたデータの終端位置
 							pmt_tail = TS_PKTSIZE;
 							bSplitPMT = TRUE;
-							pmt_ci = pSrc[3] & 0x0f;
-							if (pmt_ci == 0x0f)
-								pmt_ci = 0;
+							rpmt_ci = pSrc[3] & 0x0f;
+							if (rpmt_ci == 0x0f)
+								rpmt_ci = 0;
 							else
-								pmt_ci++;
+								rpmt_ci++;
 							goto next;
 						}
 						// 揃った
@@ -1018,7 +1084,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 						if (!bSplitPMT)		// 分割PMTの続き待ち中でなければ
 							goto next;
 						// CIが期待している値ではない、もしくはpayloadが無い場合
-						if (((pSrc[3] & 0x0f) != pmt_ci) || !(pSrc[3] & 0x10))
+						if (((pSrc[3] & 0x0f) != rpmt_ci) || !(pSrc[3] & 0x10))
 						{
 							// 最初からやり直し
 							bSplitPMT = FALSE;
@@ -1045,10 +1111,10 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 						if (len > (pmt_tail - 8 + (TS_PKTSIZE - 4 - adplen)))	// まだ全部揃ってない
 						{
 							pmt_tail += (TS_PKTSIZE - 4 - adplen);
-							if (pmt_ci == 0x0f)
-								pmt_ci = 0;
+							if (rpmt_ci == 0x0f)
+								rpmt_ci = 0;
 							else
-								pmt_ci++;
+								rpmt_ci++;
 							goto next;
 						}
 						// 揃った
@@ -1168,8 +1234,34 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					// 3 = table_idからsection_lengthまでの3バイト
 					if (CalcCRC32(&p[5], len + 3) == 0)
 					{
+						// 分割PMTをまとめる場合は、送信用PMTパケット作成
+						if (g_ModPMT)
+						{
+							// TSヘッダを除いた残りデータサイズ
+							// 4 = pointer_fieldの1バイト + 上のと同じ3バイト
+							int left = 4 + len;
+							// このPMTをいくつのTSパケットに分割する必要があるか
+							iNumSplit = (left / (TS_PKTSIZE - 4)) + 1;
+							::memset(pPMTPackets, 0xff, (TS_PKTSIZE * iNumSplit));
+							for (int i = 0; i < iNumSplit; i++)
+							{
+								// TSヘッダの4バイト分をコピー
+								::memcpy(&pPMTPackets[TS_PKTSIZE * i], p, 4);
+								// 先頭パケット以外はunit_start_indicatorを外す
+								if (i != 0)
+									pPMTPackets[(TS_PKTSIZE * i) + 1] &= ~0x40;
+								int n;
+								if (left > (TS_PKTSIZE - 4))
+									n = TS_PKTSIZE - 4;
+								else
+									n = left;
+								::memcpy(&pPMTPackets[(TS_PKTSIZE * i) + 4], &p[4 + ((TS_PKTSIZE - 4) * i)], n);
+								left -= n;
+							}
+							bPMTComplete = TRUE;
+						}
 						// 新PIDマップを適用
-						memcpy(&pids, p_new_pids, sizeof(pids));
+						::memcpy(&pids, p_new_pids, sizeof(pids));
 						// チャンネル変更でなければ
 						if (!pDVB->m_bChannelChanged)
 						{
