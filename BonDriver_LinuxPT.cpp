@@ -849,6 +849,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							// 分割PMTをまとめる場合かつ、送信用PMTができているなら
 							if (g_ModPMT && bPMTComplete)
 							{
+							complete:
 								for (int i = 0; i < iNumSplit; i++)
 								{
 									pPMTPackets[(TS_PKTSIZE * i) + 3] = wpmt_ci;
@@ -1061,6 +1062,23 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					// 3 = table_idからsection_lengthまでの3バイト
 					if (CalcCRC32(&p[5], len + 3) == 0)
 					{
+						// 新PIDマップを適用
+						::memcpy(&pids, p_new_pids, sizeof(pids));
+						// チャンネル変更でなければ
+						if (!pLinuxPT->m_bChannelChanged)
+						{
+							// 旧PIDマップをマージ
+							PID_MERGE(&pids, p_old_pids);
+						}
+						else
+							pLinuxPT->m_bChannelChanged = FALSE;
+						// 次回は今回のPMTで示されたPIDを旧PIDマップとする
+						pid_set *p_tmp_pids;
+						p_tmp_pids = p_old_pids;
+						p_old_pids = p_new_pids;
+						p_new_pids = p_tmp_pids;
+						// PMT更新処理完了
+						bChangePMT = bSplitPMT = FALSE;
 						// 分割PMTをまとめる場合は、送信用PMTパケット作成
 						if (g_ModPMT)
 						{
@@ -1086,24 +1104,9 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 								left -= n;
 							}
 							bPMTComplete = TRUE;
+							// まずこのパケットを送信
+							goto complete;
 						}
-						// 新PIDマップを適用
-						::memcpy(&pids, p_new_pids, sizeof(pids));
-						// チャンネル変更でなければ
-						if (!pLinuxPT->m_bChannelChanged)
-						{
-							// 旧PIDマップをマージ
-							PID_MERGE(&pids, p_old_pids);
-						}
-						else
-							pLinuxPT->m_bChannelChanged = FALSE;
-						// 次回は今回のPMTで示されたPIDを旧PIDマップとする
-						pid_set *p_tmp_pids;
-						p_tmp_pids = p_old_pids;
-						p_old_pids = p_new_pids;
-						p_new_pids = p_tmp_pids;
-						// PMT更新処理完了
-						bChangePMT = bSplitPMT = FALSE;
 					}
 					else
 					{
