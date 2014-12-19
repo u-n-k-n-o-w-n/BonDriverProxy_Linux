@@ -22,7 +22,7 @@ namespace BonDriver_Proxy {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MAX_HOST_LEN	64
+#define MAX_HOST_LEN	256
 static char g_Host[MAX_HOST_LEN];
 static unsigned short g_Port;
 static char g_BonDriver[512];
