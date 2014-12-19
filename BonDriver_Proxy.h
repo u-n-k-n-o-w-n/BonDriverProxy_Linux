@@ -23,8 +23,9 @@ namespace BonDriver_Proxy {
 ////////////////////////////////////////////////////////////////////////////////
 
 #define MAX_HOST_LEN	256
+#define MAX_PORT_LEN	8
 static char g_Host[MAX_HOST_LEN];
-static unsigned short g_Port;
+static char g_Port[MAX_PORT_LEN];
 static char g_BonDriver[512];
 static BOOL g_ChannelLock = FALSE;
 static size_t g_PacketFifoSize = 32;
@@ -34,7 +35,7 @@ static int g_ConnectTimeOut = 5;
 static BOOL g_UseMagicPacket = FALSE;
 static char g_TargetMac[6];
 static char g_TargetHost[MAX_HOST_LEN];
-static unsigned short g_TargetPort;
+static char g_TargetPort[MAX_PORT_LEN];
 
 ////////////////////////////////////////////////////////////////////////////////
 
