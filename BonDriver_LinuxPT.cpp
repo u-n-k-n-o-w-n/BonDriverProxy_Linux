@@ -634,7 +634,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 	BYTE pPMT[4104+TS_PKTSIZE];	// 4104 = 8(TSヘッダ + pointer_field + table_idからsection_length) + 4096(セクション長最大値)
 	BYTE pPMTPackets[TS_PKTSIZE*32];
 	int pos, iNumSplit;
-	unsigned char pat_ci, rpmt_ci, wpmt_ci, lpmt_version, lcat_version;
+	unsigned char pat_ci, rpmt_ci, wpmt_ci, lpmt_version, lcat_version, ver;
 	unsigned short ltsid, pidPMT, pidEMM, pmt_tail;
 	BOOL bChangePMT, bSplitPMT, bPMTComplete;
 	pid_set pids, save_pids[2], *p_new_pids, *p_old_pids;
@@ -765,7 +765,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 					{
 						// version_number
-						unsigned char ver = (pSrc[10] >> 1) & 0x1f;
+						ver = (pSrc[10] >> 1) & 0x1f;
 						if (ver != lcat_version)
 						{
 							// section_length
@@ -826,7 +826,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 					if ((pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 					{
 						// version_number
-						unsigned char ver = (pSrc[10] >> 1) & 0x1f;
+						ver = (pSrc[10] >> 1) & 0x1f;
 						if (ver != lpmt_version)	// バージョンが更新された
 						{
 							bChangePMT = TRUE;	// PMT更新処理開始
