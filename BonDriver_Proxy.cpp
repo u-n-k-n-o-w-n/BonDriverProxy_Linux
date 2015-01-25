@@ -2,9 +2,6 @@
 
 namespace BonDriver_Proxy {
 
-static std::list<cProxyClient *> InstanceList;
-static cCriticalSection Lock_Global;
-
 static BOOL IsTagMatch(const char *line, const char *tag, char **value)
 {
 	const int taglen = ::strlen(tag);
@@ -175,7 +172,7 @@ cProxyClient::cProxyClient() : m_Error(m_c, m_m), m_SingleShot(m_c, m_m), m_fifo
 //	m_iEndCount = -1;
 	size_t n = 0;
 	char *p = (char *)TUNER_NAME;
-	while (1)
+	for (;;)
 	{
 		m_TunerName[n++] = *p;
 		m_TunerName[n++] = '\0';
@@ -280,7 +277,7 @@ DWORD cProxyClient::Process()
 	m_SingleShot.Set();
 
 	cEvent *h[2] = { &m_Error, m_fifoRecv.GetEventHandle() };
-	while (1)
+	for (;;)
 	{
 		DWORD dwRet = cEvent::MultipleWait(2, h);
 		switch (dwRet)
@@ -462,7 +459,7 @@ void *cProxyClient::Receiver(LPVOID pv)
 	cPacketHolder *pPh = NULL;
 	const DWORD MaxPacketBufSize = g_TsPacketBufSize + (sizeof(DWORD) * 2);
 
-	while (1)
+	for (;;)
 	{
 		pPh = new cPacketHolder(MaxPacketBufSize);
 		left = sizeof(stPacketHead);
@@ -562,7 +559,7 @@ void *cProxyClient::Sender(LPVOID pv)
 	cProxyClient *pProxy = static_cast<cProxyClient *>(pv);
 	DWORD &ret = pProxy->m_tRet;
 	cEvent *h[2] = { &(pProxy->m_Error), pProxy->m_fifoSend.GetEventHandle() };
-	while (1)
+	for (;;)
 	{
 		DWORD dwRet = cEvent::MultipleWait(2, h);
 		switch (dwRet)
@@ -607,7 +604,7 @@ end:
 BOOL cProxyClient::SelectBonDriver()
 {
 	{
-		LOCK(Lock_Global);
+		LOCK(g_Lock);
 		makePacket(eSelectBonDriver, g_BonDriver);
 	}
 	if (m_bResEvent[ebResSelectBonDriver]->Wait(&m_Error) != WAIT_OBJECT_0)
@@ -759,8 +756,8 @@ void cProxyClient::Release(void)
 	makePacket(eRelease);
 	m_bRereased = TRUE;
 	{
-		LOCK(Lock_Global);
-		InstanceList.remove(this);
+		LOCK(g_Lock);
+		g_InstanceList.remove(this);
 	}
 	delete this;
 }
@@ -1000,8 +997,8 @@ extern "C" IBonDriver *CreateBonDriver()
 
 	if (pProxy->CreateBonDriver())
 	{
-		LOCK(Lock_Global);
-		InstanceList.push_back(pProxy);
+		LOCK(g_Lock);
+		g_InstanceList.push_back(pProxy);
 		return pProxy;
 	}
 
@@ -1012,7 +1009,7 @@ err:
 
 extern "C" BOOL SetBonDriver(LPCSTR p)
 {
-	LOCK(Lock_Global);
+	LOCK(g_Lock);
 	if (::strlen(p) >= sizeof(g_BonDriver))
 		return FALSE;
 	::strcpy(g_BonDriver, p);

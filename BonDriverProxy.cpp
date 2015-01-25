@@ -4,9 +4,6 @@ namespace BonDriverProxy {
 
 #define STRICT_LOCK
 
-static std::list<cProxyServer *> InstanceList;
-static cCriticalSection Lock_Instance;
-
 static int Init(int ac, char *av[])
 {
 	if (ac < 3)
@@ -46,13 +43,13 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 
 cProxyServer::~cProxyServer()
 {
-	LOCK(Lock_Instance);
+	LOCK(g_Lock);
 	BOOL bRelease = TRUE;
-	std::list<cProxyServer *>::iterator it = InstanceList.begin();
-	while (it != InstanceList.end())
+	std::list<cProxyServer *>::iterator it = g_InstanceList.begin();
+	while (it != g_InstanceList.end())
 	{
 		if (*it == this)
-			InstanceList.erase(it++);
+			g_InstanceList.erase(it++);
 		else
 		{
 			if ((m_hModule != NULL) && (m_hModule == (*it)->m_hModule))
@@ -135,7 +132,7 @@ DWORD cProxyServer::Process()
 	}
 
 	cEvent *h[2] = { &m_Error, m_fifoRecv.GetEventHandle() };
-	while (1)
+	for (;;)
 	{
 		DWORD dwRet = cEvent::MultipleWait(2, h);
 		switch (dwRet)
@@ -146,7 +143,7 @@ DWORD cProxyServer::Process()
 		case WAIT_OBJECT_0 + 1:
 		{
 #ifdef STRICT_LOCK
-			LOCK(Lock_Instance);
+			LOCK(g_Lock);
 #endif
 			cPacketHolder *pPh = NULL;
 			m_fifoRecv.Pop(&pPh);
@@ -160,9 +157,9 @@ DWORD cProxyServer::Process()
 				{
 					BOOL bFind = FALSE;
 #ifndef STRICT_LOCK
-					LOCK(Lock_Instance);
+					LOCK(g_Lock);
 #endif
-					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (::strcmp((LPCSTR)(pPh->m_pPacket->payload), (*it)->m_strBonDriver) == 0)
 						{
@@ -181,14 +178,14 @@ DWORD cProxyServer::Process()
 						bSuccess = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload));
 						if (bSuccess)
 						{
-							InstanceList.push_back(this);
+							g_InstanceList.push_back(this);
 							::strncpy(m_strBonDriver, (LPCSTR)(pPh->m_pPacket->payload), sizeof(m_strBonDriver) - 1);
 							m_strBonDriver[sizeof(m_strBonDriver) - 1] = '\0';
 						}
 					}
 					else
 					{
-						InstanceList.push_back(this);
+						g_InstanceList.push_back(this);
 						bSuccess = TRUE;
 					}
 					makePacket(eSelectBonDriver, bSuccess);
@@ -203,9 +200,9 @@ DWORD cProxyServer::Process()
 					BOOL bFind = FALSE;
 					{
 #ifndef STRICT_LOCK
-						LOCK(Lock_Instance);
+						LOCK(g_Lock);
 #endif
-						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+						for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 						{
 							if (*it == this)
 								continue;
@@ -253,9 +250,9 @@ DWORD cProxyServer::Process()
 				BOOL bFind = FALSE;
 				{
 #ifndef STRICT_LOCK
-					LOCK(Lock_Instance);
+					LOCK(g_Lock);
 #endif
-					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (*it == this)
 							continue;
@@ -281,9 +278,9 @@ DWORD cProxyServer::Process()
 				BOOL bFind = FALSE;
 				{
 #ifndef STRICT_LOCK
-					LOCK(Lock_Instance);
+					LOCK(g_Lock);
 #endif
-					for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+					for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 					{
 						if (*it == this)
 							continue;
@@ -392,9 +389,9 @@ DWORD cProxyServer::Process()
 					BOOL bLocked = FALSE;
 					{
 #ifndef STRICT_LOCK
-						LOCK(Lock_Instance);
+						LOCK(g_Lock);
 #endif
-						for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+						for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 						{
 							if (*it == this)
 								continue;
@@ -444,8 +441,8 @@ DWORD cProxyServer::Process()
 								// ただしそのかわりに、BonDriver_Proxyをロードし、そこからのプロキシチェーンのどこかで
 								// 自分自身に再帰接続した場合はデッドロックとなるので注意
 								BOOL bFind = FALSE;
-								LOCK(Lock_Instance);
-								for (std::list<cProxyServer *>::iterator it = InstanceList.begin(); it != InstanceList.end(); ++it)
+								LOCK(g_Lock);
+								for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 								{
 									if (*it == this)
 										continue;
@@ -592,7 +589,7 @@ void *cProxyServer::Receiver(LPVOID pv)
 	char *p;
 	cPacketHolder *pPh = NULL;
 
-	while (1)
+	for (;;)
 	{
 		pPh = new cPacketHolder(16);
 		left = sizeof(stPacketHead);
@@ -692,7 +689,7 @@ void *cProxyServer::Sender(LPVOID pv)
 	cProxyServer *pProxy = static_cast<cProxyServer *>(pv);
 	DWORD &ret = pProxy->m_tRet;
 	cEvent *h[2] = { &(pProxy->m_Error), pProxy->m_fifoSend.GetEventHandle() };
-	while (1)
+	for (;;)
 	{
 		DWORD dwRet = cEvent::MultipleWait(2, h);
 		switch (dwRet)
@@ -759,7 +756,9 @@ void *cProxyServer::TsReader(LPVOID pv)
 		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
 		if ((now - before) >= 1000)
 		{
+			// TsLock.Enter();
 			fSignalLevel = pIBon->GetSignalLevel();
+			// TsLock.Leave();
 			before = now;
 		}
 		dwSize = dwRemain = 0;
@@ -953,7 +952,7 @@ static int Listen(char *host, char *port)
 		return 3;
 	}
 
-	while (1)
+	for (;;)
 	{
 		csock = ::accept(lsock, NULL, NULL);
 		if (csock == INVALID_SOCKET)
