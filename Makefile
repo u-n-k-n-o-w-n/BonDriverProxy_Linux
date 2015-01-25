@@ -5,22 +5,26 @@ include Makefile.in
 SRCDIR = .
 LDFLAGS =
 LIBS = -ldl
-SRCS = BonDriverProxy.cpp sample.cpp
+SRCS = BonDriverProxy.cpp BonDriverProxyEx.cpp sample.cpp
 SOSRCS = BonDriver_Proxy.cpp
 ifneq ($(UNAME), Darwin)
 	SOSRCS += BonDriver_LinuxPT.cpp BonDriver_DVB.cpp
 endif
 
 ifeq ($(UNAME), Darwin)
-all: server client sample util
+all: server serverex client sample util
 else
-all: server client driver sample util
+all: server serverex client driver sample util
 endif
 server: BonDriverProxy
+serverex: BonDriverProxyEx
 client: BonDriver_Proxy.$(EXT)
 driver: BonDriver_LinuxPT.$(EXT) BonDriver_DVB.$(EXT)
 
 BonDriverProxy: BonDriverProxy.o
+	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
+
+BonDriverProxyEx: BonDriverProxyEx.o
 	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
 
 BonDriver_Proxy.$(EXT): BonDriver_Proxy.$(EXT).o
@@ -45,7 +49,7 @@ util:
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(ADDCOMPILEFLAGS) -c -o $@ $<
 
 clean:
-	$(RM) *.o *.so *.dylib BonDriverProxy sample .depend
+	$(RM) *.o *.so *.dylib BonDriverProxy BonDriverProxyEx sample .depend
 	$(RM) -r *.dSYM
 	@cd util; make clean
 distclean: clean
