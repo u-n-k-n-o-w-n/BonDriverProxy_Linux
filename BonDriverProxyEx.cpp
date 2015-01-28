@@ -417,18 +417,23 @@ DWORD cProxyServerEx::Process()
 					{
 						*m_pStopTsRead = TRUE;
 						::pthread_join(m_hTsRead, NULL);
-						m_hTsRead = 0;
 						delete m_pTsReceiversList;
-						m_pTsReceiversList = NULL;
 						delete m_pStopTsRead;
-						m_pStopTsRead = NULL;
 						delete m_pTsLock;
-						m_pTsLock = NULL;
 						delete m_ppos;
-						m_ppos = NULL;
 					}
 					CloseTuner();
 				}
+				else
+				{
+					if (m_hTsRead)
+						StopTsReceive();
+				}
+				m_hTsRead = 0;
+				m_pTsReceiversList = NULL;
+				m_pStopTsRead = NULL;
+				m_pTsLock = NULL;
+				m_ppos = NULL;
 				m_bTunerOpen = FALSE;
 				break;
 			}
@@ -622,10 +627,10 @@ DWORD cProxyServerEx::Process()
 										m_pTsReceiversList->push_back(this);
 										m_pTsLock->Leave();
 									}
-	#ifdef DEBUG
+#ifdef DEBUG
 									::fprintf(stderr, "** found! ** : m_hModule[%p] / m_iDriverNo[%d] / m_pIBon[%p]\n", m_hModule, m_iDriverNo, m_pIBon);
 									::fprintf(stderr, "             : m_dwSpace[%d] / m_dwChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
-	#endif
+#endif
 									goto ok;	// これは酷い
 								}
 							}
@@ -689,10 +694,10 @@ DWORD cProxyServerEx::Process()
 							}
 						}
 
-	#ifdef DEBUG
+#ifdef DEBUG
 						::fprintf(stderr, "eSetChannel2 : bShared[%d] / bLocked[%d] / bChanged[%d]\n", bShared, bLocked, bChanged);
 						::fprintf(stderr, "             : dwReqSpace[%d] / dwReqChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
-	#endif
+#endif
 
 						if (bLocked && !m_bChannelLock)
 						{
@@ -1104,19 +1109,18 @@ void cProxyServerEx::StopTsReceive()
 	// 1. グローバルなインスタンスロック中
 	// 2. かつ、TS受信中(m_hTsRead != 0)
 	// の2つを満たす状態で呼び出す事
+	m_pTsLock->Enter();
+	std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
+	while (it != m_pTsReceiversList->end())
 	{
-		LOCK(*m_pTsLock);
-		std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
-		while (it != m_pTsReceiversList->end())
+		if (*it == this)
 		{
-			if (*it == this)
-			{
-				m_pTsReceiversList->erase(it);
-				break;
-			}
-			++it;
+			m_pTsReceiversList->erase(it);
+			break;
 		}
+		++it;
 	}
+	m_pTsLock->Leave();
 	// 自分が最後の受信者だった場合は、TS配信スレッドも停止
 	if (m_pTsReceiversList->empty())
 	{

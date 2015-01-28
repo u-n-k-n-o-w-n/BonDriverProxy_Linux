@@ -77,19 +77,18 @@ cProxyServer::~cProxyServer()
 	{
 		if (m_hTsRead)
 		{
+			m_pTsLock->Enter();
+			it = m_pTsReceiversList->begin();
+			while (it != m_pTsReceiversList->end())
 			{
-				LOCK(*m_pTsLock);
-				it = m_pTsReceiversList->begin();
-				while (it != m_pTsReceiversList->end())
+				if (*it == this)
 				{
-					if (*it == this)
-					{
-						m_pTsReceiversList->erase(it);
-						break;
-					}
-					++it;
+					m_pTsReceiversList->erase(it);
+					break;
 				}
+				++it;
 			}
+			m_pTsLock->Leave();
 			// 可能性は低いがゼロではない…
 			if (m_pTsReceiversList->empty())
 			{
@@ -147,6 +146,43 @@ DWORD cProxyServer::Process()
 #endif
 			cPacketHolder *pPh = NULL;
 			m_fifoRecv.Pop(&pPh);
+#ifdef DEBUG
+			{
+				const char *CommandName[]={
+					"eSelectBonDriver",
+					"eCreateBonDriver",
+					"eOpenTuner",
+					"eCloseTuner",
+					"eSetChannel1",
+					"eGetSignalLevel",
+					"eWaitTsStream",
+					"eGetReadyCount",
+					"eGetTsStream",
+					"ePurgeTsStream",
+					"eRelease",
+
+					"eGetTunerName",
+					"eIsTunerOpening",
+					"eEnumTuningSpace",
+					"eEnumChannelName",
+					"eSetChannel2",
+					"eGetCurSpace",
+					"eGetCurChannel",
+
+					"eGetTotalDeviceNum",
+					"eGetActiveDeviceNum",
+					"eSetLnbPower",
+				};
+				if (pPh->GetCommand() <= eSetLnbPower)
+				{
+					::fprintf(stderr, "Recieve Command : [%s]\n", CommandName[pPh->GetCommand()]);
+				}
+				else
+				{
+					::fprintf(stderr, "Illegal Command : [%d]\n", (int)(pPh->GetCommand()));
+				}
+			}
+#endif
 			switch (pPh->GetCommand())
 			{
 			case eSelectBonDriver:
@@ -300,18 +336,49 @@ DWORD cProxyServer::Process()
 					{
 						*m_pStopTsRead = TRUE;
 						::pthread_join(m_hTsRead, NULL);
-						m_hTsRead = 0;
 						delete m_pTsReceiversList;
-						m_pTsReceiversList = NULL;
 						delete m_pStopTsRead;
-						m_pStopTsRead = NULL;
 						delete m_pTsLock;
-						m_pTsLock = NULL;
 						delete m_ppos;
-						m_ppos = NULL;
 					}
 					CloseTuner();
 				}
+				else
+				{
+					if (m_hTsRead)
+					{
+#ifndef STRICT_LOCK
+						LOCK(g_Lock);
+#endif
+						m_pTsLock->Enter();
+						std::list<cProxyServer *>::iterator it = m_pTsReceiversList->begin();
+						while (it != m_pTsReceiversList->end())
+						{
+							if (*it == this)
+							{
+								m_pTsReceiversList->erase(it);
+								break;
+							}
+							++it;
+						}
+						m_pTsLock->Leave();
+						// 可能性は低いがゼロではない…
+						if (m_pTsReceiversList->empty())
+						{
+							*m_pStopTsRead = TRUE;
+							::pthread_join(m_hTsRead, NULL);
+							delete m_pTsReceiversList;
+							delete m_pStopTsRead;
+							delete m_pTsLock;
+							delete m_ppos;
+						}
+					}
+				}
+				m_hTsRead = 0;
+				m_pTsReceiversList = NULL;
+				m_pStopTsRead = NULL;
+				m_pTsLock = NULL;
+				m_ppos = NULL;
 				m_bTunerOpen = FALSE;
 				break;
 			}
@@ -986,11 +1053,13 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+#ifndef DEBUG
 	if (daemon(1, 1))
 	{
 		perror("daemon");
 		return -1;
 	}
+#endif
 
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
