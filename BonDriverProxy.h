@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <errno.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -40,6 +41,14 @@ static char g_Host[256];
 static char g_Port[8];
 static size_t g_PacketFifoSize = 64;
 static DWORD g_TsPacketBufSize = (188 * 1024);
+static BOOL g_DisableUnloadBonDriver = TRUE;	// bdplの標準はTRUEにする
+
+#define BONDRIVER_PATH_MAX	512
+struct stLoadedDriver {
+	char strBonDriver[BONDRIVER_PATH_MAX];
+	HMODULE hModule;
+};
+static std::list<stLoadedDriver *> g_LoadedDriverList;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -57,7 +66,7 @@ class cProxyServer {
 	pthread_cond_t m_c;
 	pthread_mutex_t m_m;
 	cEvent m_Error;
-	char m_strBonDriver[512];
+	char m_strBonDriver[BONDRIVER_PATH_MAX];
 	BOOL m_bTunerOpen;
 	DWORD m_tRet;
 	pthread_t m_hTsRead;

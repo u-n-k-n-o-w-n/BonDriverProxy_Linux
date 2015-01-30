@@ -11,14 +11,23 @@ static void Handler(int sig)
 
 static void CleanUp()
 {
-	DriversMap.clear();
 	for (int i = 0; i < MAX_DRIVERS; i++)
 	{
 		if (g_ppDriver[i] == NULL)
 			break;
+		std::vector<stDriver> &v = DriversMap[g_ppDriver[i][0]];
+		for (size_t j = 0; j < v.size(); j++)
+		{
+			if (v[j].hModule != NULL)
+			{
+				::dlclose(v[j].hModule);
+				::fprintf(stderr, "[%s] unloaded\n", v[j].strBonDriver);
+			}
+		}
 		delete[] g_ppDriver[i][0];
 		delete[] g_ppDriver[i];
 	}
+	DriversMap.clear();
 }
 #endif
 
@@ -127,6 +136,7 @@ static int Init(int ac, char *av[])
 			for (int i = 1; i < cntD; i++)
 			{
 				vstDriver[i-1].strBonDriver = ppDriver[i];
+				vstDriver[i-1].hModule = NULL;
 				vstDriver[i-1].bUsed = FALSE;
 			}
 			DriversMap[ppDriver[0]] = vstDriver;
@@ -210,7 +220,14 @@ cProxyServerEx::~cProxyServerEx()
 		{
 			std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
 			vstDriver[m_iDriverNo].bUsed = FALSE;
-			::dlclose(m_hModule);
+			if (!g_DisableUnloadBonDriver)
+			{
+				::dlclose(m_hModule);
+				vstDriver[m_iDriverNo].hModule = NULL;
+#ifdef DEBUG
+				::fprintf(stderr, "[%s] unloaded\n", vstDriver[m_iDriverNo].strBonDriver);
+#endif
+			}
 		}
 	}
 	else
@@ -595,8 +612,15 @@ DWORD cProxyServerEx::Process()
 												{
 													std::vector<stDriver> &vstDriver = DriversMap[m_pDriversMapKey];
 													vstDriver[m_iDriverNo].bUsed = FALSE;
-													::dlclose(m_hModule);
-													// m_hModule = NULL;
+													if (!g_DisableUnloadBonDriver)
+													{
+														::dlclose(m_hModule);
+														// m_hModule = NULL;
+														vstDriver[m_iDriverNo].hModule = NULL;
+#ifdef DEBUG
+														::fprintf(stderr, "[%s] unloaded\n", vstDriver[m_iDriverNo].strBonDriver);
+#endif
+													}
 												}
 											}
 										}
@@ -1170,32 +1194,41 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		i = (int)(vstDriver.size() - 1);
 	for (;;)
 	{
-		if (vstDriver[i].bUsed == FALSE)
+		if (vstDriver[i].bUsed != FALSE)
+			goto next;
+		HMODULE hModule;
+		if (vstDriver[i].hModule != NULL)
+			hModule = vstDriver[i].hModule;
+		else
 		{
-			HMODULE hModule = ::dlopen(vstDriver[i].strBonDriver, RTLD_LAZY);
-			if (hModule != NULL)
-			{
-				m_hModule = hModule;
-				vstDriver[i].bUsed = TRUE;
-				vstDriver[i].tLoad = tNow;
-				m_pDriversMapKey = pKey;
-				m_iDriverNo = i;
-
-				// 各種項目再初期化の前に、現在TSストリーム配信中ならその配信対象リストから自身を削除
-				if (m_hTsRead)
-					StopTsReceive();
-
-				// eSetChannel2からも呼ばれるので、各種項目再初期化
-				m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
-				m_bTunerOpen = FALSE;
-				m_hTsRead = 0;
-				m_pTsReceiversList = NULL;
-				m_pStopTsRead = NULL;
-				m_pTsLock = NULL;
-				m_ppos = NULL;
-				return TRUE;
-			}
+			hModule = ::dlopen(vstDriver[i].strBonDriver, RTLD_LAZY);
+			if (hModule == NULL)
+				goto next;
+			vstDriver[i].hModule = hModule;
+#ifdef DEBUG
+			::fprintf(stderr, "[%s] loaded\n", vstDriver[i].strBonDriver);
+#endif
 		}
+		m_hModule = hModule;
+		vstDriver[i].bUsed = TRUE;
+		vstDriver[i].tLoad = tNow;
+		m_pDriversMapKey = pKey;
+		m_iDriverNo = i;
+
+		// 各種項目再初期化の前に、現在TSストリーム配信中ならその配信対象リストから自身を削除
+		if (m_hTsRead)
+			StopTsReceive();
+
+		// eSetChannel2からも呼ばれるので、各種項目再初期化
+		m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
+		m_bTunerOpen = FALSE;
+		m_hTsRead = 0;
+		m_pTsReceiversList = NULL;
+		m_pStopTsRead = NULL;
+		m_pTsLock = NULL;
+		m_ppos = NULL;
+		return TRUE;
+	next:
 		if (m_iDriverUseOrder == 0)
 		{
 			if (i >= (int)(vstDriver.size() - 1))
@@ -1335,7 +1368,7 @@ IBonDriver *cProxyServerEx::CreateBonDriver()
 		char *err;
 		::dlerror();
 		IBonDriver *(*f)() = (IBonDriver *(*)())::dlsym(m_hModule, "CreateBonDriver");
-		if ((err = dlerror()) == NULL)
+		if ((err = ::dlerror()) == NULL)
 		{
 			try { m_pIBon = f(); }
 			catch (...) {}

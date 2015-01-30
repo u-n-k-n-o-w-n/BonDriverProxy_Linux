@@ -4,6 +4,29 @@ namespace BonDriverProxy {
 
 #define STRICT_LOCK
 
+#ifdef DEBUG
+static BOOL g_bStop;	// 初期値FALSE
+static void Handler(int sig)
+{
+	g_bStop = TRUE;
+}
+
+static void CleanUp()
+{
+	if (g_DisableUnloadBonDriver)
+	{
+		while (!g_LoadedDriverList.empty())
+		{
+			stLoadedDriver *pLd = g_LoadedDriverList.front();
+			g_LoadedDriverList.pop_front();
+			::dlclose(pLd->hModule);
+			::fprintf(stderr, "[%s] unloaded\n", pLd->strBonDriver);
+			delete pLd;
+		}
+	}
+}
+#endif
+
 static int Init(int ac, char *av[])
 {
 	if (ac < 3)
@@ -71,7 +94,15 @@ cProxyServer::~cProxyServer()
 		if (m_pIBon)
 			m_pIBon->Release();
 		if (m_hModule)
-			::dlclose(m_hModule);
+		{
+			if (!g_DisableUnloadBonDriver)
+			{
+				::dlclose(m_hModule);
+#ifdef DEBUG
+				::fprintf(stderr, "[%s] unloaded\n", m_strBonDriver);
+#endif
+			}
+		}
 	}
 	else
 	{
@@ -191,40 +222,45 @@ DWORD cProxyServer::Process()
 					makePacket(eSelectBonDriver, FALSE);
 				else
 				{
-					BOOL bFind = FALSE;
-#ifndef STRICT_LOCK
-					LOCK(g_Lock);
-#endif
-					for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
-					{
-						if (::strcmp((LPCSTR)(pPh->m_pPacket->payload), (*it)->m_strBonDriver) == 0)
-						{
-							bFind = TRUE;
-							m_hModule = (*it)->m_hModule;
-							::strcpy(m_strBonDriver, (*it)->m_strBonDriver);
-							m_pIBon = (*it)->m_pIBon;	// (*it)->m_pIBonがNULLの可能性はゼロではない
-							m_pIBon2 = (*it)->m_pIBon2;
-							m_pIBon3 = (*it)->m_pIBon3;
-							break;
-						}
-					}
-					BOOL bSuccess;
-					if (!bFind)
-					{
-						bSuccess = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload));
-						if (bSuccess)
-						{
-							g_InstanceList.push_back(this);
-							::strncpy(m_strBonDriver, (LPCSTR)(pPh->m_pPacket->payload), sizeof(m_strBonDriver) - 1);
-							m_strBonDriver[sizeof(m_strBonDriver) - 1] = '\0';
-						}
-					}
+					LPCSTR p = (LPCSTR)(pPh->m_pPacket->payload);
+					if (::strlen(p) > (sizeof(m_strBonDriver) - 1))
+						makePacket(eSelectBonDriver, FALSE);
 					else
 					{
-						g_InstanceList.push_back(this);
-						bSuccess = TRUE;
+						BOOL bFind = FALSE;
+#ifndef STRICT_LOCK
+						LOCK(g_Lock);
+#endif
+						for (std::list<cProxyServer *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
+						{
+							if (::strcmp(p, (*it)->m_strBonDriver) == 0)
+							{
+								bFind = TRUE;
+								m_hModule = (*it)->m_hModule;
+								::strcpy(m_strBonDriver, (*it)->m_strBonDriver);
+								m_pIBon = (*it)->m_pIBon;	// (*it)->m_pIBonがNULLの可能性はゼロではない
+								m_pIBon2 = (*it)->m_pIBon2;
+								m_pIBon3 = (*it)->m_pIBon3;
+								break;
+							}
+						}
+						BOOL bSuccess;
+						if (!bFind)
+						{
+							bSuccess = SelectBonDriver(p);
+							if (bSuccess)
+							{
+								g_InstanceList.push_back(this);
+								::strcpy(m_strBonDriver, p);
+							}
+						}
+						else
+						{
+							g_InstanceList.push_back(this);
+							bSuccess = TRUE;
+						}
+						makePacket(eSelectBonDriver, bSuccess);
 					}
-					makePacket(eSelectBonDriver, bSuccess);
 				}
 				break;
 			}
@@ -883,8 +919,38 @@ void *cProxyServer::TsReader(LPVOID pv)
 
 BOOL cProxyServer::SelectBonDriver(LPCSTR p)
 {
-	m_hModule = ::dlopen(p, RTLD_LAZY);
-	return (m_hModule != NULL);
+	HMODULE hModule = NULL;
+	BOOL bLoaded = FALSE;
+	for (std::list<stLoadedDriver *>::iterator it = g_LoadedDriverList.begin(); it != g_LoadedDriverList.end(); ++it)
+	{
+		if (::strcmp(p, (*it)->strBonDriver) == 0)
+		{
+			hModule = (*it)->hModule;
+			bLoaded = TRUE;
+			break;
+		}
+	}
+	if (hModule == NULL)
+	{
+		hModule = ::dlopen(p, RTLD_LAZY);
+		if (hModule == NULL)
+			return FALSE;
+#ifdef DEBUG
+		::fprintf(stderr, "[%s] loaded\n", p);
+#endif
+	}
+
+	m_hModule = hModule;
+
+	if (g_DisableUnloadBonDriver && !bLoaded)
+	{
+		stLoadedDriver *pLd = new stLoadedDriver;
+		::strcpy(pLd->strBonDriver, p);	// stLoadedDriver::strBonDriverのサイズはProxyServer::m_strBonDriverと同じ
+		pLd->hModule = hModule;
+		g_LoadedDriverList.push_back(pLd);
+	}
+
+	return TRUE;
 }
 
 IBonDriver *cProxyServer::CreateBonDriver()
@@ -894,7 +960,7 @@ IBonDriver *cProxyServer::CreateBonDriver()
 		char *err;
 		::dlerror();
 		IBonDriver *(*f)() = (IBonDriver *(*)())::dlsym(m_hModule, "CreateBonDriver");
-		if ((err = dlerror()) == NULL)
+		if ((err = ::dlerror()) == NULL)
 		{
 			try { m_pIBon = f(); }
 			catch (...) {}
@@ -1023,7 +1089,13 @@ static int Listen(char *host, char *port)
 	{
 		csock = ::accept(lsock, NULL, NULL);
 		if (csock == INVALID_SOCKET)
+		{
+#ifdef DEBUG
+			if ((errno == EINTR) && g_bStop)
+				break;
+#endif
 			continue;
+		}
 
 		cProxyServer *pProxy = new cProxyServer();
 		pProxy->setSocket(csock);
@@ -1067,11 +1139,25 @@ int main(int argc, char *argv[])
 	sigemptyset(&sa.sa_mask);
 	if (sigaction(SIGPIPE, &sa, NULL))
 	{
-		perror("sigaction");
+		perror("sigaction1");
 		return -2;
 	}
+#ifdef DEBUG
+	sa.sa_handler = BonDriverProxy::Handler;
+	if (sigaction(SIGINT, &sa, NULL))
+	{
+		perror("sigaction2");
+		return -3;
+	}
+#endif
 
 	int ret = BonDriverProxy::Listen(BonDriverProxy::g_Host, BonDriverProxy::g_Port);
+
+#ifdef DEBUG
+	BonDriverProxy::g_Lock.Enter();
+	BonDriverProxy::CleanUp();
+	BonDriverProxy::g_Lock.Leave();
+#endif
 
 	return ret;
 }

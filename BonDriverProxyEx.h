@@ -44,12 +44,14 @@ static char g_Host[256];
 static char g_Port[8];
 static size_t g_PacketFifoSize = 64;
 static DWORD g_TsPacketBufSize = (188 * 1024);
-static DWORD g_OpenTunerRetDelay;	// デフォルト値は0
+static DWORD g_OpenTunerRetDelay;				// デフォルト値は0
+static BOOL g_DisableUnloadBonDriver = TRUE;	// bdplの標準はTRUEにする
 
 #define MAX_DRIVERS	64		// ドライバのグループ数とグループ内の数の両方
 static char **g_ppDriver[MAX_DRIVERS];
 struct stDriver {
 	char *strBonDriver;
+	HMODULE hModule;
 	BOOL bUsed;
 	time_t tLoad;
 };
