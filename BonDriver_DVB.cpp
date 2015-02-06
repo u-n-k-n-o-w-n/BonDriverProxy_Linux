@@ -1259,7 +1259,7 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 							// 4 = pointer_fieldの1バイト + 上のと同じ3バイト
 							int left = 4 + len;
 							// このPMTをいくつのTSパケットに分割する必要があるか
-							iNumSplit = (left / (TS_PKTSIZE - 4)) + 1;
+							iNumSplit = ((left - 1) / (TS_PKTSIZE - 4)) + 1;
 							::memset(pPMTPackets, 0xff, (TS_PKTSIZE * iNumSplit));
 							for (int i = 0; i < iNumSplit; i++)
 							{
