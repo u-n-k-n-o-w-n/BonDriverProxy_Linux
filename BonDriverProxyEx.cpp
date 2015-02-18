@@ -1348,6 +1348,8 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		m_pStopTsRead = pCandidate->m_pStopTsRead;
 		m_pTsLock = pCandidate->m_pTsLock;
 		m_ppos = pCandidate->m_ppos;
+		m_dwSpace = pCandidate->m_dwSpace;
+		m_dwChannel = pCandidate->m_dwChannel;
 	}
 
 	// 選択したインスタンスが既にTSストリーム配信中なら、その配信対象リストに自身を追加
