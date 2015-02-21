@@ -25,7 +25,11 @@ namespace BonDriver_DVB {
 #define MAX_CH				128
 #define MAX_CN_LEN			64
 
+#define TS_SYNC_BYTE		0x47
 #define TS_PKTSIZE			188
+#define TTS_PKTSIZE			192
+#define TS_FEC_PKTSIZE		204
+#define TTS_FEC_PKTSIZE		208
 #define TS_BUFSIZE			(TS_PKTSIZE * 256)
 #define TS_FIFOSIZE			512
 #define WAIT_TIME			10	// デバイスからのread()でエラーが発生した場合の、次のread()までの間隔(ms)
@@ -73,6 +77,9 @@ class cBonDriverDVB : public IBonDriver2 {
 	volatile BOOL m_bStopTsRead;
 	cEvent m_StopTsSplit;
 	BOOL m_bChannelChanged;
+	DWORD m_dwUnitSize;
+	DWORD m_dwSyncBufPos;
+	BYTE m_SyncBuf[256];
 
 	void TsFlush(BOOL bUseServiceID)
 	{
@@ -82,6 +89,7 @@ class cBonDriverDVB : public IBonDriver2 {
 	}
 	static void *TsReader(LPVOID pv);
 	static void *TsSplitter(LPVOID pv);
+	BOOL TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst);
 	static inline unsigned short GetPID(BYTE *p){ return (((unsigned short)(p[0] & 0x1f) << 8) | p[1]); }
 	static inline unsigned short GetSID(BYTE *p){ return (((unsigned short)p[0] << 8) | p[1]); }
 

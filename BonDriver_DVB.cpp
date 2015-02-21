@@ -11,6 +11,7 @@ static BOOL g_UseLNB;
 static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
 static BOOL g_ModPMT;
+static BOOL g_TsSync;
 
 static int Convert(char *src, char *dst, size_t dstsize)
 {
@@ -94,6 +95,7 @@ static int Init()
 	BOOL blFlag = FALSE;
 	BOOL bsFlag = FALSE;
 	BOOL bmFlag = FALSE;
+	BOOL btFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
@@ -131,6 +133,11 @@ static int Init()
 		{
 			g_ModPMT = ::atoi(p);
 			bmFlag = TRUE;
+		}
+		else if (!btFlag && IsTagMatch(buf, "#TSSYNC", &p))
+		{
+			g_TsSync = ::atoi(p);
+			btFlag = TRUE;
 		}
 		else
 		{
@@ -286,6 +293,7 @@ cBonDriverDVB::cBonDriverDVB() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_m), m_St
 	m_hTsRead = m_hTsSplit = 0;
 	m_bStopTsRead = FALSE;
 	m_bChannelChanged = FALSE;
+	m_dwUnitSize = m_dwSyncBufPos = 0;
 
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -839,8 +847,18 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 			pDVB->m_fifoRawTS.Pop(&pRawBuf);
 			if (pRawBuf == NULL)	// イベントのトリガからPop()までの間に別スレッドにFlush()される可能性はゼロではない
 				break;
-			BYTE *pSrc = pRawBuf->pbBuf;
-			DWORD dwLeft = pRawBuf->dwSize;	// 必ずTS_PKTSIZEの倍数で来る
+			BYTE *pSrc, *pSrcHead;
+			DWORD dwLeft;
+			if (g_TsSync)
+			{
+				pDVB->TsSync(pRawBuf->pbBuf, pRawBuf->dwSize, &pSrcHead, &dwLeft);
+				pSrc = pSrcHead;
+			}
+			else
+			{
+				pSrc = pRawBuf->pbBuf;
+				dwLeft = pRawBuf->dwSize;	// 必ずTS_PKTSIZEの倍数で来る
+			}
 			while (dwLeft > 0)
 			{
 				unsigned short pid = GetPID(&pSrc[1]);
@@ -1312,6 +1330,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					pos = 0;
 				}
 			}
+			if (g_TsSync)
+				delete[] pSrcHead;
 			delete pRawBuf;
 		}
 		}
@@ -1319,6 +1339,208 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 end:
 	delete[] pTsBuf;
 	return NULL;
+}
+
+BOOL cBonDriverDVB::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
+{
+	// 既に同期済みか？
+	if (m_dwUnitSize != 0)
+	{
+		for (DWORD pos = m_dwUnitSize - m_dwSyncBufPos; pos < dwSrc; pos += m_dwUnitSize)
+		{
+			if (pSrc[pos] != TS_SYNC_BYTE)
+			{
+				// 今回の入力バッファで同期が崩れてしまうので要再同期
+				m_dwUnitSize = 0;
+				goto resync;
+			}
+		}
+		DWORD dwDst = TS_PKTSIZE * (((m_dwSyncBufPos + dwSrc) - 1) / m_dwUnitSize);
+		if (dwDst == 0)
+		{
+			// 同期用繰り越しバッファと今回の入力バッファを合わせてもユニットサイズ+1に
+			// 届かなかった(==次の同期バイトのチェックが行えなかった)ので、
+			// 今回の入力バッファを同期用繰り越しバッファに追加するだけで終了
+			::memcpy(&m_SyncBuf[m_dwSyncBufPos], pSrc, dwSrc);
+			m_dwSyncBufPos += dwSrc;
+			*ppDst = NULL;	// 呼び出し側でのdelete[]を保証する
+			*pdwDst = 0;
+			return FALSE;
+		}
+		BYTE *pDst = new BYTE[dwDst];
+		if (m_dwSyncBufPos >= TS_PKTSIZE)
+			::memcpy(pDst, m_SyncBuf, TS_PKTSIZE);
+		else
+		{
+			if (m_dwSyncBufPos == 0)
+				::memcpy(pDst, pSrc, TS_PKTSIZE);
+			else
+			{
+				::memcpy(pDst, m_SyncBuf, m_dwSyncBufPos);
+				::memcpy(&pDst[m_dwSyncBufPos], pSrc, TS_PKTSIZE - m_dwSyncBufPos);
+			}
+		}
+		DWORD dwSrcPos = m_dwUnitSize - m_dwSyncBufPos;
+		if (m_dwUnitSize == TS_PKTSIZE)
+		{
+			// 普通のTSパケットの場合はそのままコピーできる
+			if ((dwDst - TS_PKTSIZE) != 0)
+			{
+				::memcpy(&pDst[TS_PKTSIZE], &pSrc[dwSrcPos], (dwDst - TS_PKTSIZE));
+				dwSrcPos += (dwDst - TS_PKTSIZE);
+			}
+		}
+		else
+		{
+			// それ以外のパケットの場合は普通のTSパケットに変換
+			for (DWORD pos = TS_PKTSIZE; (dwSrcPos + m_dwUnitSize) < dwSrc; dwSrcPos += m_dwUnitSize, pos += TS_PKTSIZE)
+				::memcpy(&pDst[pos], &pSrc[dwSrcPos], TS_PKTSIZE);
+		}
+		if ((dwSrc - dwSrcPos) != 0)
+		{
+			// 入力バッファに余りがあるので同期用繰り越しバッファに保存
+			::memcpy(m_SyncBuf, &pSrc[dwSrcPos], (dwSrc - dwSrcPos));
+			m_dwSyncBufPos = dwSrc - dwSrcPos;
+		}
+		else
+			m_dwSyncBufPos = 0;
+		*ppDst = pDst;
+		*pdwDst = dwDst;
+		return TRUE;
+	}
+
+resync:
+	// 同期処理開始
+	DWORD dwSyncBufPos = m_dwSyncBufPos;
+	for (DWORD off = 0; (off + TS_PKTSIZE) < (dwSyncBufPos + dwSrc); off++)
+	{
+		if (((off >= dwSyncBufPos) && (pSrc[off - dwSyncBufPos] == TS_SYNC_BYTE)) || ((off < dwSyncBufPos) && (m_SyncBuf[off] == TS_SYNC_BYTE)))
+		{
+			for (int type = 0; type < 4; type++)
+			{
+				DWORD dwUnitSize;
+				switch (type)
+				{
+				case 0:
+					dwUnitSize = TS_PKTSIZE;
+					break;
+				case 1:
+					dwUnitSize = TTS_PKTSIZE;
+					break;
+				case 2:
+					dwUnitSize = TS_FEC_PKTSIZE;
+					break;
+				default:
+					dwUnitSize = TTS_FEC_PKTSIZE;
+					break;
+				}
+				BOOL bSync = TRUE;
+				// 次の同期バイトが同期用繰り越しバッファ内に含まれている可能性があるか？
+				if (dwUnitSize >= dwSyncBufPos)
+				{
+					// なかった場合は同期用繰り越しバッファのチェックは不要
+					DWORD pos = off + (dwUnitSize - dwSyncBufPos);
+					if (pos >= dwSrc)
+					{
+						// bSync = FALSE;
+						// これ以降のユニットサイズではこの場所で同期成功する事は無いのでbreak
+						break;
+					}
+					else
+					{
+						// 同一ユニットサイズのバッファが8個もしくは今回の入力バッファの
+						// 最後まで並んでいるなら同期成功とみなす
+						int n = 0;
+						do
+						{
+							if (pSrc[pos] != TS_SYNC_BYTE)
+							{
+								bSync = FALSE;
+								break;
+							}
+							pos += dwUnitSize;
+							n++;
+						} while ((n < 8) && (pos < dwSrc));
+					}
+				}
+				else
+				{
+					DWORD pos = off + dwUnitSize;
+					if (pos >= (dwSyncBufPos + dwSrc))
+					{
+						// bSync = FALSE;
+						// これ以降のユニットサイズではこの場所で同期成功する事は無いのでbreak
+						break;
+					}
+					else
+					{
+						// 同一ユニットサイズのバッファが8個もしくは今回の入力バッファの
+						// 最後まで並んでいるなら同期成功とみなす
+						int n = 0;
+						do
+						{
+							if (((pos >= dwSyncBufPos) && (pSrc[pos - dwSyncBufPos] != TS_SYNC_BYTE)) || ((pos < dwSyncBufPos) && (m_SyncBuf[pos] != TS_SYNC_BYTE)))
+							{
+								bSync = FALSE;
+								break;
+							}
+							pos += dwUnitSize;
+							n++;
+						} while ((n < 8) && (pos < (dwSyncBufPos + dwSrc)));
+					}
+				}
+				if (bSync)
+				{
+					m_dwUnitSize = dwUnitSize;
+					if (off < dwSyncBufPos)
+					{
+						if (off != 0)
+						{
+							dwSyncBufPos -= off;
+							::memmove(m_SyncBuf, &m_SyncBuf[off], dwSyncBufPos);
+						}
+						// この同期検出ロジックでは↓の状態は起こり得ないハズ
+#if 0
+						// 同期済み時の同期用繰り越しバッファサイズはユニットサイズ以下である必要がある
+						if (dwSyncBufPos > dwUnitSize)
+						{
+							dwSyncBufPos -= dwUnitSize;
+							::memmove(m_SyncBuf, &m_SyncBuf[dwUnitSize], dwSyncBufPos);
+						}
+#endif
+						m_dwSyncBufPos = dwSyncBufPos;
+						return TsSync(pSrc, dwSrc, ppDst, pdwDst);
+					}
+					else
+					{
+						m_dwSyncBufPos = 0;
+						return TsSync(&pSrc[off - dwSyncBufPos], (dwSrc - (off - dwSyncBufPos)), ppDst, pdwDst);
+					}
+				}
+			}
+		}
+	}
+
+	// 今回の入力では同期できなかったので、同期用繰り越しバッファに保存だけして終了
+	if (dwSrc >= sizeof(m_SyncBuf))
+	{
+		::memcpy(m_SyncBuf, &pSrc[dwSrc - sizeof(m_SyncBuf)], sizeof(m_SyncBuf));
+		m_dwSyncBufPos = sizeof(m_SyncBuf);
+	}
+	else if ((dwSyncBufPos + dwSrc) > sizeof(m_SyncBuf))
+	{
+		::memmove(m_SyncBuf, &m_SyncBuf[(dwSyncBufPos + dwSrc) - sizeof(m_SyncBuf)], (sizeof(m_SyncBuf) - dwSrc));
+		::memcpy(&m_SyncBuf[sizeof(m_SyncBuf) - dwSrc], pSrc, dwSrc);
+		m_dwSyncBufPos = sizeof(m_SyncBuf);
+	}
+	else
+	{
+		::memcpy(&m_SyncBuf[dwSyncBufPos], pSrc, dwSrc);
+		m_dwSyncBufPos += dwSrc;
+	}
+	*ppDst = NULL;	// 呼び出し側でのdelete[]を保証する
+	*pdwDst = 0;
+	return FALSE;
 }
 
 }
