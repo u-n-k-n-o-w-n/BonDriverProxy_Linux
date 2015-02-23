@@ -64,6 +64,23 @@ static std::map<char *, std::vector<stDriver> > DriversMap;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+class cProxyServerEx;
+
+struct stTsReaderArg {
+	IBonDriver *pIBon;
+	volatile BOOL StopTsRead;
+	volatile BOOL ChannelChanged;
+	DWORD pos;
+	std::list<cProxyServerEx *> TsReceiversList;
+	cCriticalSection TsLock;
+	stTsReaderArg()
+	{
+		StopTsRead = FALSE;
+		ChannelChanged = TRUE;
+		pos = 0;
+	}
+};
+
 class cProxyServerEx {
 	IBonDriver *m_pIBon;
 	IBonDriver2 *m_pIBon2;
@@ -74,13 +91,10 @@ class cProxyServerEx {
 	pthread_mutex_t m_m;
 	cEvent m_Error;
 	BOOL m_bTunerOpen;
+	BOOL m_bChannelLock;
 	DWORD m_tRet;
 	pthread_t m_hTsRead;
-	std::list<cProxyServerEx *> *m_pTsReceiversList;
-	BOOL * volatile m_pStopTsRead;
-	cCriticalSection *m_pTsLock;
-	DWORD *m_ppos;
-	BOOL m_bChannelLock;
+	stTsReaderArg *m_pTsReaderArg;
 	DWORD m_dwSpace;
 	DWORD m_dwChannel;
 	char *m_pDriversMapKey;

@@ -57,6 +57,23 @@ static std::list<stLoadedDriver *> g_LoadedDriverList;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+class cProxyServer;
+
+struct stTsReaderArg {
+	IBonDriver *pIBon;
+	volatile BOOL StopTsRead;
+	volatile BOOL ChannelChanged;
+	DWORD pos;
+	std::list<cProxyServer *> TsReceiversList;
+	cCriticalSection TsLock;
+	stTsReaderArg()
+	{
+		StopTsRead = FALSE;
+		ChannelChanged = TRUE;
+		pos = 0;
+	}
+};
+
 class cProxyServer {
 	IBonDriver *m_pIBon;
 	IBonDriver2 *m_pIBon2;
@@ -68,13 +85,10 @@ class cProxyServer {
 	cEvent m_Error;
 	char m_strBonDriver[BONDRIVER_PATH_MAX];
 	BOOL m_bTunerOpen;
+	BOOL m_bChannelLock;
 	DWORD m_tRet;
 	pthread_t m_hTsRead;
-	std::list<cProxyServer *> *m_pTsReceiversList;
-	BOOL * volatile m_pStopTsRead;
-	cCriticalSection *m_pTsLock;
-	DWORD *m_ppos;
-	BOOL m_bChannelLock;
+	stTsReaderArg *m_pTsReaderArg;
 	cPacketFifo m_fifoSend;
 	cPacketFifo m_fifoRecv;
 

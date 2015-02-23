@@ -171,10 +171,7 @@ cProxyServerEx::cProxyServerEx() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fi
 	m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
 	m_bTunerOpen = m_bChannelLock = FALSE;
 	m_hTsRead = 0;
-	m_pTsReceiversList = NULL;
-	m_pStopTsRead = NULL;
-	m_pTsLock = NULL;
-	m_ppos = NULL;
+	m_pTsReaderArg = NULL;
 	m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
 	m_pDriversMapKey = NULL;
 	m_iDriverNo = -1;
@@ -207,12 +204,9 @@ cProxyServerEx::~cProxyServerEx()
 	{
 		if (m_hTsRead)
 		{
-			*m_pStopTsRead = TRUE;
+			m_pTsReaderArg->StopTsRead = TRUE;
 			::pthread_join(m_hTsRead, NULL);
-			delete m_pTsReceiversList;
-			delete m_pStopTsRead;
-			delete m_pTsLock;
-			delete m_ppos;
+			delete m_pTsReaderArg;
 		}
 		if (m_pIBon)
 			m_pIBon->Release();
@@ -432,12 +426,9 @@ DWORD cProxyServerEx::Process()
 				{
 					if (m_hTsRead)
 					{
-						*m_pStopTsRead = TRUE;
+						m_pTsReaderArg->StopTsRead = TRUE;
 						::pthread_join(m_hTsRead, NULL);
-						delete m_pTsReceiversList;
-						delete m_pStopTsRead;
-						delete m_pTsLock;
-						delete m_ppos;
+						delete m_pTsReaderArg;
 					}
 					CloseTuner();
 				}
@@ -447,10 +438,7 @@ DWORD cProxyServerEx::Process()
 						StopTsReceive();
 				}
 				m_hTsRead = 0;
-				m_pTsReceiversList = NULL;
-				m_pStopTsRead = NULL;
-				m_pTsLock = NULL;
-				m_ppos = NULL;
+				m_pTsReaderArg = NULL;
 				m_bTunerOpen = FALSE;
 				break;
 			}
@@ -459,9 +447,10 @@ DWORD cProxyServerEx::Process()
 			{
 				if (m_hTsRead && m_bChannelLock)
 				{
-					LOCK(*m_pTsLock);
+					m_pTsReaderArg->TsLock.Enter();
 					PurgeTsStream();
-					*m_ppos = 0;
+					m_pTsReaderArg->pos = 0;
+					m_pTsReaderArg->TsLock.Leave();
 					makePacket(ePurgeTsStream, TRUE);
 				}
 				else
@@ -541,7 +530,6 @@ DWORD cProxyServerEx::Process()
 					{
 						BOOL bSuccess;
 						BOOL bLocked = FALSE;
-						BOOL bChanged = FALSE;
 						BOOL bShared = FALSE;
 						BOOL bSetChannel = FALSE;
 						for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
@@ -588,17 +576,11 @@ DWORD cProxyServerEx::Process()
 										{
 											if (m_hTsRead)
 											{
-												*m_pStopTsRead = TRUE;
+												m_pTsReaderArg->StopTsRead = TRUE;
 												::pthread_join(m_hTsRead, NULL);
 												//m_hTsRead = 0;
-												delete m_pTsReceiversList;
-												//m_pTsReceiversList = NULL;
-												delete m_pStopTsRead;
-												//m_pStopTsRead = NULL;
-												delete m_pTsLock;
-												//m_pTsLock = NULL;
-												delete m_ppos;
-												//m_ppos = NULL;
+												delete m_pTsReaderArg;
+												//m_pTsReaderArg = NULL;
 											}
 											CloseTuner();
 											//m_bTunerOpen = FALSE;
@@ -633,7 +615,6 @@ DWORD cProxyServerEx::Process()
 									}
 
 									// インスタンス切り替え
-									bChanged = TRUE;
 									m_hModule = (*it)->m_hModule;
 									m_iDriverNo = (*it)->m_iDriverNo;
 									m_pIBon = (*it)->m_pIBon;
@@ -641,15 +622,12 @@ DWORD cProxyServerEx::Process()
 									m_pIBon3 = (*it)->m_pIBon3;
 									m_bTunerOpen = TRUE;
 									m_hTsRead = (*it)->m_hTsRead;	// この時点でもNULLの可能性はゼロではない
-									m_pTsReceiversList = (*it)->m_pTsReceiversList;
-									m_pStopTsRead = (*it)->m_pStopTsRead;
-									m_pTsLock = (*it)->m_pTsLock;
-									m_ppos = (*it)->m_ppos;
+									m_pTsReaderArg = (*it)->m_pTsReaderArg;
 									if (m_hTsRead)
 									{
-										m_pTsLock->Enter();
-										m_pTsReceiversList->push_back(this);
-										m_pTsLock->Leave();
+										m_pTsReaderArg->TsLock.Enter();
+										m_pTsReaderArg->TsReceiversList.push_back(this);
+										m_pTsReaderArg->TsLock.Leave();
 									}
 #ifdef DEBUG
 									::fprintf(stderr, "** found! ** : m_hModule[%p] / m_iDriverNo[%d] / m_pIBon[%p]\n", m_hModule, m_iDriverNo, m_pIBon);
@@ -663,8 +641,6 @@ DWORD cProxyServerEx::Process()
 						// 同一チャンネルを使用中のチューナは見つからず、現在のチューナは共有されていたら
 						if (bShared)
 						{
-							IBonDriver *old_pIBon = m_pIBon;
-							BOOL old_bTunerOpen = m_bTunerOpen;
 							// 出来れば未使用、無理ならなるべくロックされてないチューナを選択して、
 							// 一気にチューナオープン状態にまで持って行く
 							if (SelectBonDriver(m_pDriversMapKey))
@@ -678,14 +654,6 @@ DWORD cProxyServerEx::Process()
 										m_Error.Set();
 										break;
 									}
-								}
-								else
-								{
-									// インスタンス切り替えか？
-									if (m_pIBon != old_pIBon)
-										bChanged = TRUE;
-									else
-										m_bTunerOpen = old_bTunerOpen;
 								}
 								if (!m_bTunerOpen)
 								{
@@ -719,7 +687,7 @@ DWORD cProxyServerEx::Process()
 						}
 
 #ifdef DEBUG
-						::fprintf(stderr, "eSetChannel2 : bShared[%d] / bLocked[%d] / bChanged[%d]\n", bShared, bLocked, bChanged);
+						::fprintf(stderr, "eSetChannel2 : bShared[%d] / bLocked[%d]\n", bShared, bLocked);
 						::fprintf(stderr, "             : dwReqSpace[%d] / dwReqChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
 #endif
 
@@ -733,10 +701,22 @@ DWORD cProxyServerEx::Process()
 						else
 						{
 							if (m_hTsRead)
-								m_pTsLock->Enter();
+								m_pTsReaderArg->TsLock.Enter();
 							bSuccess = SetChannel(dwReqSpace, dwReqChannel);
 							if (m_hTsRead)
-								m_pTsLock->Leave();
+							{
+								// 一旦ロックを外すとチャンネル変更前のデータが送信されない事を保証できなくなる為、
+								// チャンネル変更前のデータの破棄とCNRの更新指示はここで行う
+								if (bSuccess)
+								{
+									// 同一チャンネルを使用中のチューナが見つからなかった場合は、このリクエストで
+									// インスタンスの切り替えが発生していたとしても、この時点ではどうせチャンネルが
+									// 変更されているので、未送信バッファを破棄しても別に問題にはならないハズ
+									m_pTsReaderArg->pos = 0;
+									m_pTsReaderArg->ChannelChanged = TRUE;
+								}
+								m_pTsReaderArg->TsLock.Leave();
+							}
 							if (bSuccess)
 							{
 								bSetChannel = TRUE;
@@ -746,39 +726,15 @@ DWORD cProxyServerEx::Process()
 								makePacket(eSetChannel2, (DWORD)0x00);
 								if (m_hTsRead == 0)
 								{
-									m_pTsReceiversList = new std::list<cProxyServerEx *>();
-									m_pTsReceiversList->push_back(this);
-									m_pStopTsRead = new BOOL(FALSE);
-									m_pTsLock = new cCriticalSection();
-									m_ppos = new DWORD(0);
-									LPVOID *ppv = new LPVOID[5];
-									ppv[0] = m_pIBon;
-									ppv[1] = m_pTsReceiversList;
-									ppv[2] = m_pStopTsRead;
-									ppv[3] = m_pTsLock;
-									ppv[4] = m_ppos;
-									if (::pthread_create(&m_hTsRead, NULL, cProxyServerEx::TsReader, ppv))
+									m_pTsReaderArg = new stTsReaderArg();
+									m_pTsReaderArg->TsReceiversList.push_back(this);
+									m_pTsReaderArg->pIBon = m_pIBon;
+									if (::pthread_create(&m_hTsRead, NULL, cProxyServerEx::TsReader, m_pTsReaderArg))
 									{
 										m_hTsRead = 0;
-										delete[] ppv;
-										delete m_pTsReceiversList;
-										m_pTsReceiversList = NULL;
-										delete m_pStopTsRead;
-										m_pStopTsRead = NULL;
-										delete m_pTsLock;
-										m_pTsLock = NULL;
-										delete m_ppos;
-										m_ppos = NULL;
+										delete m_pTsReaderArg;
+										m_pTsReaderArg = NULL;
 										m_Error.Set();
-									}
-								}
-								else
-								{
-									// インスタンス切り替えだった場合は既存のTSバッファに介入しない
-									if (!bChanged)
-									{
-										LOCK(*m_pTsLock);
-										*m_ppos = 0;
 									}
 								}
 								if (bSetChannel)
@@ -798,15 +754,12 @@ DWORD cProxyServerEx::Process()
 												// 強制的に配信開始
 												(*it)->m_bTunerOpen = TRUE;
 												(*it)->m_hTsRead = m_hTsRead;
-												(*it)->m_pTsReceiversList = m_pTsReceiversList;
-												(*it)->m_pStopTsRead = m_pStopTsRead;
-												(*it)->m_pTsLock = m_pTsLock;
-												(*it)->m_ppos = m_ppos;
+												(*it)->m_pTsReaderArg = m_pTsReaderArg;
 												if (m_hTsRead)
 												{
-													m_pTsLock->Enter();
-													m_pTsReceiversList->push_back(*it);
-													m_pTsLock->Leave();
+													m_pTsReaderArg->TsLock.Enter();
+													m_pTsReaderArg->TsReceiversList.push_back(*it);
+													m_pTsReaderArg->TsLock.Leave();
 												}
 											}
 										}
@@ -1045,13 +998,13 @@ end:
 
 void *cProxyServerEx::TsReader(LPVOID pv)
 {
-	LPVOID *ppv = static_cast<LPVOID *>(pv);
-	IBonDriver *pIBon = static_cast<IBonDriver *>(ppv[0]);
-	std::list<cProxyServerEx *> &TsReceiversList = *(static_cast<std::list<cProxyServerEx *> *>(ppv[1]));
-	volatile BOOL &StopTsRead = *(static_cast<BOOL *>(ppv[2]));
-	cCriticalSection &TsLock = *(static_cast<cCriticalSection *>(ppv[3]));
-	DWORD &pos = *(static_cast<DWORD *>(ppv[4]));
-	delete[] ppv;
+	stTsReaderArg *pArg = static_cast<stTsReaderArg *>(pv);
+	IBonDriver *pIBon = pArg->pIBon;
+	volatile BOOL &StopTsRead = pArg->StopTsRead;
+	volatile BOOL &ChannelChanged = pArg->ChannelChanged;
+	DWORD &pos = pArg->pos;
+	std::list<cProxyServerEx *> &TsReceiversList = pArg->TsReceiversList;
+	cCriticalSection &TsLock = pArg->TsLock;
 	DWORD dwSize, dwRemain, now, before = 0;
 	float fSignalLevel = 0;
 	const DWORD TsPacketBufSize = g_TsPacketBufSize;
@@ -1065,18 +1018,17 @@ void *cProxyServerEx::TsReader(LPVOID pv)
 	// TS読み込みループ
 	while (!StopTsRead)
 	{
-		::gettimeofday(&tv, NULL);
-		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-		if ((now - before) >= 1000)
-		{
-			// TsLock.Enter();
-			fSignalLevel = pIBon->GetSignalLevel();
-			// TsLock.Leave();
-			before = now;
-		}
 		dwSize = dwRemain = 0;
 		{
 			LOCK(TsLock);
+			::gettimeofday(&tv, NULL);
+			now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+			if (((now - before) >= 1000) || ChannelChanged)
+			{
+				fSignalLevel = pIBon->GetSignalLevel();
+				before = now;
+				ChannelChanged = FALSE;
+			}
 			if (pIBon->GetTsStream(&pBuf, &dwSize, &dwRemain) && (dwSize != 0))
 			{
 				if ((pos + dwSize) < TsPacketBufSize)
@@ -1133,32 +1085,26 @@ void cProxyServerEx::StopTsReceive()
 	// 1. グローバルなインスタンスロック中
 	// 2. かつ、TS受信中(m_hTsRead != 0)
 	// の2つを満たす状態で呼び出す事
-	m_pTsLock->Enter();
-	std::list<cProxyServerEx *>::iterator it = m_pTsReceiversList->begin();
-	while (it != m_pTsReceiversList->end())
+	m_pTsReaderArg->TsLock.Enter();
+	std::list<cProxyServerEx *>::iterator it = m_pTsReaderArg->TsReceiversList.begin();
+	while (it != m_pTsReaderArg->TsReceiversList.end())
 	{
 		if (*it == this)
 		{
-			m_pTsReceiversList->erase(it);
+			m_pTsReaderArg->TsReceiversList.erase(it);
 			break;
 		}
 		++it;
 	}
-	m_pTsLock->Leave();
+	m_pTsReaderArg->TsLock.Leave();
 	// 自分が最後の受信者だった場合は、TS配信スレッドも停止
-	if (m_pTsReceiversList->empty())
+	if (m_pTsReaderArg->TsReceiversList.empty())
 	{
-		*m_pStopTsRead = TRUE;
+		m_pTsReaderArg->StopTsRead = TRUE;
 		::pthread_join(m_hTsRead, NULL);
 		m_hTsRead = 0;
-		delete m_pTsReceiversList;
-		m_pTsReceiversList = NULL;
-		delete m_pStopTsRead;
-		m_pStopTsRead = NULL;
-		delete m_pTsLock;
-		m_pTsLock = NULL;
-		delete m_ppos;
-		m_ppos = NULL;
+		delete m_pTsReaderArg;
+		m_pTsReaderArg = NULL;
 	}
 }
 
@@ -1223,10 +1169,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
 		m_bTunerOpen = FALSE;
 		m_hTsRead = 0;
-		m_pTsReceiversList = NULL;
-		m_pStopTsRead = NULL;
-		m_pTsLock = NULL;
-		m_ppos = NULL;
+		m_pTsReaderArg = NULL;
 		return TRUE;
 	next:
 		if (m_iDriverUseOrder == 0)
@@ -1344,10 +1287,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		m_pIBon3 = pCandidate->m_pIBon3;
 		m_bTunerOpen = pCandidate->m_bTunerOpen;
 		m_hTsRead = pCandidate->m_hTsRead;
-		m_pTsReceiversList = pCandidate->m_pTsReceiversList;
-		m_pStopTsRead = pCandidate->m_pStopTsRead;
-		m_pTsLock = pCandidate->m_pTsLock;
-		m_ppos = pCandidate->m_ppos;
+		m_pTsReaderArg = pCandidate->m_pTsReaderArg;
 		m_dwSpace = pCandidate->m_dwSpace;
 		m_dwChannel = pCandidate->m_dwChannel;
 	}
@@ -1355,9 +1295,9 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 	// 選択したインスタンスが既にTSストリーム配信中なら、その配信対象リストに自身を追加
 	if (m_hTsRead)
 	{
-		m_pTsLock->Enter();
-		m_pTsReceiversList->push_back(this);
-		m_pTsLock->Leave();
+		m_pTsReaderArg->TsLock.Enter();
+		m_pTsReaderArg->TsReceiversList.push_back(this);
+		m_pTsReaderArg->TsLock.Leave();
 	}
 
 	return (m_hModule != NULL);

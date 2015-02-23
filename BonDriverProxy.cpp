@@ -52,10 +52,7 @@ cProxyServer::cProxyServer() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fifoRe
 	m_strBonDriver[0] = '\0';
 	m_bTunerOpen = m_bChannelLock = FALSE;
 	m_hTsRead = 0;
-	m_pTsReceiversList = NULL;
-	m_pStopTsRead = NULL;
-	m_pTsLock = NULL;
-	m_ppos = NULL;
+	m_pTsReaderArg = NULL;
 
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -84,12 +81,9 @@ cProxyServer::~cProxyServer()
 	{
 		if (m_hTsRead)
 		{
-			*m_pStopTsRead = TRUE;
+			m_pTsReaderArg->StopTsRead = TRUE;
 			::pthread_join(m_hTsRead, NULL);
-			delete m_pTsReceiversList;
-			delete m_pStopTsRead;
-			delete m_pTsLock;
-			delete m_ppos;
+			delete m_pTsReaderArg;
 		}
 		if (m_pIBon)
 			m_pIBon->Release();
@@ -108,27 +102,24 @@ cProxyServer::~cProxyServer()
 	{
 		if (m_hTsRead)
 		{
-			m_pTsLock->Enter();
-			it = m_pTsReceiversList->begin();
-			while (it != m_pTsReceiversList->end())
+			m_pTsReaderArg->TsLock.Enter();
+			it = m_pTsReaderArg->TsReceiversList.begin();
+			while (it != m_pTsReaderArg->TsReceiversList.end())
 			{
 				if (*it == this)
 				{
-					m_pTsReceiversList->erase(it);
+					m_pTsReaderArg->TsReceiversList.erase(it);
 					break;
 				}
 				++it;
 			}
-			m_pTsLock->Leave();
+			m_pTsReaderArg->TsLock.Leave();
 			// 可能性は低いがゼロではない…
-			if (m_pTsReceiversList->empty())
+			if (m_pTsReaderArg->TsReceiversList.empty())
 			{
-				*m_pStopTsRead = TRUE;
+				m_pTsReaderArg->StopTsRead = TRUE;
 				::pthread_join(m_hTsRead, NULL);
-				delete m_pTsReceiversList;
-				delete m_pStopTsRead;
-				delete m_pTsLock;
-				delete m_ppos;
+				delete m_pTsReaderArg;
 			}
 		}
 	}
@@ -370,12 +361,9 @@ DWORD cProxyServer::Process()
 				{
 					if (m_hTsRead)
 					{
-						*m_pStopTsRead = TRUE;
+						m_pTsReaderArg->StopTsRead = TRUE;
 						::pthread_join(m_hTsRead, NULL);
-						delete m_pTsReceiversList;
-						delete m_pStopTsRead;
-						delete m_pTsLock;
-						delete m_ppos;
+						delete m_pTsReaderArg;
 					}
 					CloseTuner();
 				}
@@ -386,35 +374,29 @@ DWORD cProxyServer::Process()
 #ifndef STRICT_LOCK
 						LOCK(g_Lock);
 #endif
-						m_pTsLock->Enter();
-						std::list<cProxyServer *>::iterator it = m_pTsReceiversList->begin();
-						while (it != m_pTsReceiversList->end())
+						m_pTsReaderArg->TsLock.Enter();
+						std::list<cProxyServer *>::iterator it = m_pTsReaderArg->TsReceiversList.begin();
+						while (it != m_pTsReaderArg->TsReceiversList.end())
 						{
 							if (*it == this)
 							{
-								m_pTsReceiversList->erase(it);
+								m_pTsReaderArg->TsReceiversList.erase(it);
 								break;
 							}
 							++it;
 						}
-						m_pTsLock->Leave();
+						m_pTsReaderArg->TsLock.Leave();
 						// 可能性は低いがゼロではない…
-						if (m_pTsReceiversList->empty())
+						if (m_pTsReaderArg->TsReceiversList.empty())
 						{
-							*m_pStopTsRead = TRUE;
+							m_pTsReaderArg->StopTsRead = TRUE;
 							::pthread_join(m_hTsRead, NULL);
-							delete m_pTsReceiversList;
-							delete m_pStopTsRead;
-							delete m_pTsLock;
-							delete m_ppos;
+							delete m_pTsReaderArg;
 						}
 					}
 				}
 				m_hTsRead = 0;
-				m_pTsReceiversList = NULL;
-				m_pStopTsRead = NULL;
-				m_pTsLock = NULL;
-				m_ppos = NULL;
+				m_pTsReaderArg = NULL;
 				m_bTunerOpen = FALSE;
 				break;
 			}
@@ -423,9 +405,10 @@ DWORD cProxyServer::Process()
 			{
 				if (m_hTsRead && m_bChannelLock)
 				{
-					LOCK(*m_pTsLock);
+					m_pTsReaderArg->TsLock.Enter();
 					PurgeTsStream();
-					*m_ppos = 0;
+					m_pTsReaderArg->pos = 0;
+					m_pTsReaderArg->TsLock.Leave();
 					makePacket(ePurgeTsStream, TRUE);
 				}
 				else
@@ -505,13 +488,10 @@ DWORD cProxyServer::Process()
 								if ((m_hTsRead == 0) && ((*it)->m_hTsRead != 0))
 								{
 									m_hTsRead = (*it)->m_hTsRead;
-									m_pTsReceiversList = (*it)->m_pTsReceiversList;
-									m_pStopTsRead = (*it)->m_pStopTsRead;
-									m_pTsLock = (*it)->m_pTsLock;
-									m_ppos = (*it)->m_ppos;
-									m_pTsLock->Enter();
-									m_pTsReceiversList->push_back(this);
-									m_pTsLock->Leave();
+									m_pTsReaderArg = (*it)->m_pTsReaderArg;
+									m_pTsReaderArg->TsLock.Enter();
+									m_pTsReaderArg->TsReceiversList.push_back(this);
+									m_pTsReaderArg->TsLock.Leave();
 								}
 							}
 						}
@@ -523,10 +503,19 @@ DWORD cProxyServer::Process()
 						DWORD *pdw1 = (DWORD *)(pPh->m_pPacket->payload);
 						DWORD *pdw2 = (DWORD *)(&(pPh->m_pPacket->payload[sizeof(DWORD)]));
 						if (m_hTsRead)
-							m_pTsLock->Enter();
+							m_pTsReaderArg->TsLock.Enter();
 						BOOL b = SetChannel(ntohl(*pdw1), ntohl(*pdw2));
 						if (m_hTsRead)
-							m_pTsLock->Leave();
+						{
+							// 一旦ロックを外すとチャンネル変更前のデータが送信されない事を保証できなくなる為、
+							// チャンネル変更前のデータの破棄とCNRの更新指示はここで行う
+							if (b)
+							{
+								m_pTsReaderArg->pos = 0;
+								m_pTsReaderArg->ChannelChanged = TRUE;
+							}
+							m_pTsReaderArg->TsLock.Leave();
+						}
 						if (b)
 						{
 							makePacket(eSetChannel2, (DWORD)0x00);
@@ -555,13 +544,10 @@ DWORD cProxyServer::Process()
 										{
 											bFind = TRUE;
 											m_hTsRead = (*it)->m_hTsRead;
-											m_pTsReceiversList = (*it)->m_pTsReceiversList;
-											m_pStopTsRead = (*it)->m_pStopTsRead;
-											m_pTsLock = (*it)->m_pTsLock;
-											m_ppos = (*it)->m_ppos;
-											m_pTsLock->Enter();
-											m_pTsReceiversList->push_back(this);
-											m_pTsLock->Leave();
+											m_pTsReaderArg = (*it)->m_pTsReaderArg;
+											m_pTsReaderArg->TsLock.Enter();
+											m_pTsReaderArg->TsReceiversList.push_back(this);
+											m_pTsReaderArg->TsLock.Leave();
 											break;
 										}
 									}
@@ -569,39 +555,19 @@ DWORD cProxyServer::Process()
 								if (!bFind)
 								{
 #endif
-									m_pTsReceiversList = new std::list<cProxyServer *>();
-									m_pTsReceiversList->push_back(this);
-									m_pStopTsRead = new BOOL(FALSE);
-									m_pTsLock = new cCriticalSection();
-									m_ppos = new DWORD(0);
-									LPVOID *ppv = new LPVOID[5];
-									ppv[0] = m_pIBon;
-									ppv[1] = m_pTsReceiversList;
-									ppv[2] = m_pStopTsRead;
-									ppv[3] = m_pTsLock;
-									ppv[4] = m_ppos;
-									if (::pthread_create(&m_hTsRead, NULL, cProxyServer::TsReader, ppv))
+									m_pTsReaderArg = new stTsReaderArg();
+									m_pTsReaderArg->TsReceiversList.push_back(this);
+									m_pTsReaderArg->pIBon = m_pIBon;
+									if (::pthread_create(&m_hTsRead, NULL, cProxyServer::TsReader, m_pTsReaderArg))
 									{
 										m_hTsRead = 0;
-										delete[] ppv;
-										delete m_pTsReceiversList;
-										m_pTsReceiversList = NULL;
-										delete m_pStopTsRead;
-										m_pStopTsRead = NULL;
-										delete m_pTsLock;
-										m_pTsLock = NULL;
-										delete m_ppos;
-										m_ppos = NULL;
+										delete m_pTsReaderArg;
+										m_pTsReaderArg = NULL;
 										m_Error.Set();
 									}
 #ifndef STRICT_LOCK
 								}
 #endif
-							}
-							else
-							{
-								LOCK(*m_pTsLock);
-								*m_ppos = 0;
 							}
 						}
 						else
@@ -835,13 +801,13 @@ end:
 
 void *cProxyServer::TsReader(LPVOID pv)
 {
-	LPVOID *ppv = static_cast<LPVOID *>(pv);
-	IBonDriver *pIBon = static_cast<IBonDriver *>(ppv[0]);
-	std::list<cProxyServer *> &TsReceiversList = *(static_cast<std::list<cProxyServer *> *>(ppv[1]));
-	volatile BOOL &StopTsRead = *(static_cast<BOOL *>(ppv[2]));
-	cCriticalSection &TsLock = *(static_cast<cCriticalSection *>(ppv[3]));
-	DWORD &pos = *(static_cast<DWORD *>(ppv[4]));
-	delete[] ppv;
+	stTsReaderArg *pArg = static_cast<stTsReaderArg *>(pv);
+	IBonDriver *pIBon = pArg->pIBon;
+	volatile BOOL &StopTsRead = pArg->StopTsRead;
+	volatile BOOL &ChannelChanged = pArg->ChannelChanged;
+	DWORD &pos = pArg->pos;
+	std::list<cProxyServer *> &TsReceiversList = pArg->TsReceiversList;
+	cCriticalSection &TsLock = pArg->TsLock;
 	DWORD dwSize, dwRemain, now, before = 0;
 	float fSignalLevel = 0;
 	const DWORD TsPacketBufSize = g_TsPacketBufSize;
@@ -855,18 +821,17 @@ void *cProxyServer::TsReader(LPVOID pv)
 	// TS読み込みループ
 	while (!StopTsRead)
 	{
-		::gettimeofday(&tv, NULL);
-		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-		if ((now - before) >= 1000)
-		{
-			// TsLock.Enter();
-			fSignalLevel = pIBon->GetSignalLevel();
-			// TsLock.Leave();
-			before = now;
-		}
 		dwSize = dwRemain = 0;
 		{
 			LOCK(TsLock);
+			::gettimeofday(&tv, NULL);
+			now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+			if (((now - before) >= 1000) || ChannelChanged)
+			{
+				fSignalLevel = pIBon->GetSignalLevel();
+				before = now;
+				ChannelChanged = FALSE;
+			}
 			if (pIBon->GetTsStream(&pBuf, &dwSize, &dwRemain) && (dwSize != 0))
 			{
 				if ((pos + dwSize) < TsPacketBufSize)
