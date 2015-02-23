@@ -62,8 +62,9 @@ class cBonDriverLinuxPT : public IBonDriver2 {
 	pthread_t m_hTsSplit;
 	DWORD m_tRet;
 	volatile BOOL m_bStopTsRead;
+	volatile BOOL m_bChannelChanged;
+	volatile BOOL m_bUpdateCNR;
 	cEvent m_StopTsSplit;
-	BOOL m_bChannelChanged;
 
 	void TsFlush(BOOL bUseServiceID)
 	{

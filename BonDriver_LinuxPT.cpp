@@ -281,8 +281,7 @@ cBonDriverLinuxPT::cBonDriverLinuxPT() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_
 	m_dwServiceID = 0xffffffff;
 	m_fd = -1;
 	m_hTsRead = m_hTsSplit = 0;
-	m_bStopTsRead = FALSE;
-	m_bChannelChanged = FALSE;
+	m_bStopTsRead = m_bChannelChanged = m_bUpdateCNR = FALSE;
 
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -345,6 +344,11 @@ const BOOL cBonDriverLinuxPT::SetChannel(const BYTE bCh)
 
 const float cBonDriverLinuxPT::GetSignalLevel(void)
 {
+	timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 10 * 1000 * 1000;
+	for (int i = 0; m_bUpdateCNR && (i < 50); i++)
+		::nanosleep(&ts, NULL);
 	return m_fCNR;
 }
 
@@ -497,6 +501,7 @@ const BOOL cBonDriverLinuxPT::SetChannel(const DWORD dwSpace, const DWORD dwChan
 	{
 		LOCK(m_writeLock);
 		TsFlush(g_UseServiceID);
+		m_bUpdateCNR = TRUE;
 	}
 
 	if (!m_hTsRead)
@@ -564,9 +569,11 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 	pos = 0;
 	while (!pLinuxPT->m_bStopTsRead)
 	{
+		pLinuxPT->m_writeLock.Enter();
+
 		::gettimeofday(&tv, NULL);
 		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-		if ((now - before) >= 1000)
+		if (((now - before) >= 1000) || pLinuxPT->m_bUpdateCNR)
 		{
 			float f = 0;
 			int signal;
@@ -581,16 +588,12 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 			}
 			pLinuxPT->m_fCNR = f;
 			before = now;
+			if (pLinuxPT->m_bUpdateCNR)
+			{
+				pos = 0;
+				pLinuxPT->m_bUpdateCNR = FALSE;
+			}
 		}
-
-		pBuf = pTsBuf + pos;
-		if ((len = ::read(pLinuxPT->m_fd, pBuf, TS_BUFSIZE - pos)) <= 0)
-		{
-			::nanosleep(&ts, NULL);
-			continue;
-		}
-
-		pos += len;
 
 		if (pos == TS_BUFSIZE)
 		{
@@ -604,6 +607,18 @@ void *cBonDriverLinuxPT::TsReader(LPVOID pv)
 			pTsBuf = new BYTE[TS_BUFSIZE];
 			pos = 0;
 		}
+
+		pLinuxPT->m_writeLock.Leave();
+
+		// この不自然な位置で読み込みを行うのは、ロック/アンロックの回数を減らしつつ
+		// スレッド起動時に初回の読み込みを捨てないようにする為…
+		pBuf = pTsBuf + pos;
+		if ((len = ::read(pLinuxPT->m_fd, pBuf, TS_BUFSIZE - pos)) <= 0)
+		{
+			::nanosleep(&ts, NULL);
+			continue;
+		}
+		pos += len;
 	}
 	delete[] pTsBuf;
 end:

@@ -291,8 +291,7 @@ cBonDriverDVB::cBonDriverDVB() : m_fifoTS(m_c, m_m), m_fifoRawTS(m_c, m_m), m_St
 	m_dwServiceID = 0xffffffff;
 	m_fefd = m_dmxfd = m_dvrfd = -1;
 	m_hTsRead = m_hTsSplit = 0;
-	m_bStopTsRead = FALSE;
-	m_bChannelChanged = FALSE;
+	m_bStopTsRead = m_bChannelChanged = m_bUpdateCNR = FALSE;
 	m_dwUnitSize = m_dwSyncBufPos = 0;
 
 	pthread_mutexattr_t attr;
@@ -451,6 +450,11 @@ const BOOL cBonDriverDVB::SetChannel(const BYTE bCh)
 
 const float cBonDriverDVB::GetSignalLevel(void)
 {
+	timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 10 * 1000 * 1000;
+	for (int i = 0; m_bUpdateCNR && (i < 50); i++)
+		::nanosleep(&ts, NULL);
 	return m_fCNR;
 }
 
@@ -656,6 +660,7 @@ const BOOL cBonDriverDVB::SetChannel(const DWORD dwSpace, const DWORD dwChannel)
 	{
 		LOCK(m_writeLock);
 		TsFlush(g_UseServiceID);
+		m_bUpdateCNR = TRUE;
 	}
 
 	if (!m_hTsRead)
@@ -716,9 +721,11 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 	pos = 0;
 	while (!pDVB->m_bStopTsRead)
 	{
+		pDVB->m_writeLock.Enter();
+
 		::gettimeofday(&tv, NULL);
 		now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-		if ((now - before) >= 1000)
+		if (((now - before) >= 1000) || pDVB->m_bUpdateCNR)
 		{
 			float f = 0;
 			if (g_GetCnrMode == 2)
@@ -762,16 +769,12 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 			}
 			pDVB->m_fCNR = f;
 			before = now;
+			if (pDVB->m_bUpdateCNR)
+			{
+				pos = 0;
+				pDVB->m_bUpdateCNR = FALSE;
+			}
 		}
-
-		pBuf = pTsBuf + pos;
-		if ((len = ::read(pDVB->m_dvrfd, pBuf, TS_BUFSIZE - pos)) <= 0)
-		{
-			::nanosleep(&ts, NULL);
-			continue;
-		}
-
-		pos += len;
 
 		if (pos == TS_BUFSIZE)
 		{
@@ -785,6 +788,18 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 			pTsBuf = new BYTE[TS_BUFSIZE];
 			pos = 0;
 		}
+
+		pDVB->m_writeLock.Leave();
+
+		// この不自然な位置で読み込みを行うのは、ロック/アンロックの回数を減らしつつ
+		// スレッド起動時に初回の読み込みを捨てないようにする為…
+		pBuf = pTsBuf + pos;
+		if ((len = ::read(pDVB->m_dvrfd, pBuf, TS_BUFSIZE - pos)) <= 0)
+		{
+			::nanosleep(&ts, NULL);
+			continue;
+		}
+		pos += len;
 	}
 	delete[] pTsBuf;
 
