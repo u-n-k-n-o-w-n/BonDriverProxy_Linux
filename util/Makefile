@@ -8,15 +8,18 @@ LIBS = -ldl
 ifeq ($(UNAME), Darwin)
 	LIBS += -liconv
 endif
-SRCS = test.cpp udpsend.c
+SRCS = test.cpp udpsend.c splitter.cpp
 
-all: test udpsend
+all: test udpsend splitter
 
 test: test.o
 	$(CXX) $(CXXFLAGS) -rdynamic -o $@ $^ $(LIBS)
 
 udpsend: udpsend.o
 	$(CC) $(CFLAGS) -o $@ $^
+
+splitter: splitter.o
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
 %.o: %.cpp .depend
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(ADDCOMPILEFLAGS) -c -o $@ $<
@@ -25,7 +28,7 @@ udpsend: udpsend.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 clean:
-	$(RM) *.o *.so *.dylib test udpsend .depend
+	$(RM) *.o *.so *.dylib test udpsend splitter .depend
 	$(RM) -r *.dSYM
 distclean: clean
 
