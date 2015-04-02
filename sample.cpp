@@ -179,6 +179,8 @@ int main(int argc, char *argv[])
 	// チューナクローズ
 	pIBon->CloseTuner();
 
+	// 現在のBonDriver_LinuxPT/DVB/Proxyの実装では無意味なのに気付いたので削除(;´Д`)失礼しました
+#if 0
 	// BonDriver内のバッファに残っている分があれば一応回収
 	while (1)
 	{
@@ -201,6 +203,7 @@ int main(int argc, char *argv[])
 		if (dwRemain == 0)
 			break;
 	}
+#endif
 
 err:
 	close(wfd);
