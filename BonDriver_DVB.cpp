@@ -1172,6 +1172,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					PID_SET(0x0027, p_new_pids);
 					// TOT PIDセット
 					PID_SET(0x0014, p_new_pids);
+					// BIT PIDセット
+					PID_SET(0x0024, p_new_pids);
 					// CDT PIDセット
 					PID_SET(0x0029, p_new_pids);
 					// EMM PIDセット
