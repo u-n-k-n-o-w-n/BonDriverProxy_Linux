@@ -12,6 +12,7 @@ static BOOL g_UseServiceID;
 static DWORD g_Crc32Table[256];
 static BOOL g_ModPMT;
 static BOOL g_TsSync;
+static DWORD g_dwDelFlag;
 
 static int Convert(char *src, char *dst, size_t dstsize)
 {
@@ -96,6 +97,7 @@ static int Init()
 	BOOL bsFlag = FALSE;
 	BOOL bmFlag = FALSE;
 	BOOL btFlag = FALSE;
+	BOOL bdFlag = FALSE;
 	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
@@ -138,6 +140,49 @@ static int Init()
 		{
 			g_TsSync = ::atoi(p);
 			btFlag = TRUE;
+		}
+		else if (!bdFlag && IsTagMatch(buf, "#DEL", &p))
+		{
+			char *pb = p;
+			const char *name[] = { "CAT", "NIT", "SDT", "EIT", "TOT", "BIT", "CDT", "ECM", "EMM", NULL };
+			int n, cnt = 1;
+			while (*p != '\0')
+			{
+				if (*p == ',')
+					cnt++;
+				p++;
+			}
+			char **pp = new char *[cnt];
+			p = pb;
+			n = 0;
+			do
+			{
+				while (*p == '\t' || *p == ' ')
+					p++;
+				pp[n++] = p;
+				while (*p != '\t' && *p != ' ' && *p != ',' && *p != '\0')
+					p++;
+				if (*p != ',' && *p != '\0')
+				{
+					*p++ = '\0';
+					while (*p != ',' && *p != '\0')
+						p++;
+				}
+				*p++ = '\0';
+			} while (n < cnt);
+			for (int i = 0; i < cnt; i++)
+			{
+				for (int j = 0; name[j] != NULL; j++)
+				{
+					if (strcmp(pp[i], name[j]) == 0)
+					{
+						g_dwDelFlag |= (1 << j);
+						break;
+					}
+				}
+			}
+			delete[] pp;
+			bdFlag = TRUE;
 		}
 		else
 		{
@@ -822,6 +867,15 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 struct pid_set {
 	int bits[MAX_PID / (8 * sizeof(int))];
 };
+#define FLAG_CAT 0x0001
+#define FLAG_NIT 0x0002
+#define FLAG_SDT 0x0004
+#define FLAG_EIT 0x0008
+#define FLAG_TOT 0x0010
+#define FLAG_BIT 0x0020
+#define FLAG_CDT 0x0040
+#define FLAG_ECM 0x0080
+#define FLAG_EMM 0x0100
 
 void *cBonDriverDVB::TsSplitter(LPVOID pv)
 {
@@ -967,49 +1021,55 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 				}
 				else if (pid == 0x0001)	// CAT
 				{
-					// ビットエラー無しかつpayload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
-					if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
+					if (!(g_dwDelFlag & FLAG_CAT))
 					{
-						// version_number
-						ver = (pSrc[10] >> 1) & 0x1f;
-						if (ver != lcat_version)
+						// ビットエラー無しかつpayload先頭かつadaptation_field無し、PSIのpointer_fieldは0x00の前提
+						if (!(pSrc[1] & 0x80) && (pSrc[1] & 0x40) && !(pSrc[3] & 0x20) && (pSrc[4] == 0x00))
 						{
-							// section_length
-							// 9 = 2つ目のreservedからlast_section_numberまでの5バイト + CRC_32の4バイト
-							int len = (((int)(pSrc[6] & 0x0f) << 8) | pSrc[7]) - 9;
-							// 13 = TSパケットの頭から最初のdescriptorまでのオフセット
-							int off = 13;
-							// CATも1TSパケットに収まってる前提
-							while (len >= 2)
+							// version_number
+							ver = (pSrc[10] >> 1) & 0x1f;
+							if (ver != lcat_version)
 							{
-								if ((off + 2) > TS_PKTSIZE)
-									break;
-								int cdesc_len = 2 + pSrc[off+1];
-								if (cdesc_len > len || (off + cdesc_len) > TS_PKTSIZE)	// descriptor長さ異常
-									break;
-								if (pSrc[off] == 0x09)	// Conditional Access Descriptor
+								// section_length
+								// 9 = 2つ目のreservedからlast_section_numberまでの5バイト + CRC_32の4バイト
+								int len = (((int)(pSrc[6] & 0x0f) << 8) | pSrc[7]) - 9;
+								// 13 = TSパケットの頭から最初のdescriptorまでのオフセット
+								int off = 13;
+								// CATも1TSパケットに収まってる前提
+								while (len >= 2)
 								{
-									if (pSrc[off+1] >= 4 && (pSrc[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
+									if ((off + 2) > TS_PKTSIZE)
+										break;
+									int cdesc_len = 2 + pSrc[off+1];
+									if (cdesc_len > len || (off + cdesc_len) > TS_PKTSIZE)	// descriptor長さ異常
+										break;
+									if (pSrc[off] == 0x09)	// Conditional Access Descriptor
 									{
-										// EMM PIDセット
-										pid = GetPID(&pSrc[off+4]);
-										if (pid != pidEMM)
+										if (pSrc[off+1] >= 4 && (pSrc[off+4] & 0xe0) == 0xe0)	// 内容が妥当なら
 										{
-											if (pidEMM != 0xffff)
-												PID_CLR(pidEMM, &pids);
-											PID_SET(pid, &pids);
-											pidEMM = pid;
+											// EMM PIDセット
+											pid = GetPID(&pSrc[off+4]);
+											if (pid != pidEMM)
+											{
+												if (pidEMM != 0xffff)
+													PID_CLR(pidEMM, &pids);
+												if (!(g_dwDelFlag & FLAG_EMM))
+												{
+													PID_SET(pid, &pids);
+													pidEMM = pid;
+												}
+											}
+											break;	// EMMが複数のPIDで送られてくる事は無い前提
 										}
-										break;	// EMMが複数のPIDで送られてくる事は無い前提
 									}
+									off += cdesc_len;
+									len -= cdesc_len;
 								}
-								off += cdesc_len;
-								len -= cdesc_len;
+								lcat_version = ver;
 							}
-							lcat_version = ver;
+							::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
+							pos += TS_PKTSIZE;
 						}
-						::memcpy(&pTsBuf[pos], pSrc, TS_PKTSIZE);
-						pos += TS_PKTSIZE;
 					}
 				}
 				else if(pid == pidPMT)	// PMT
@@ -1160,25 +1220,24 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 					PID_ZERO(p_new_pids);
 					// PMT PIDセット(マップにセットしても意味無いけど一応)
 					PID_SET(pidPMT, p_new_pids);
-					// CAT PIDセット(同上)
-					PID_SET(0x0001, p_new_pids);
-					// NIT PIDセット
-					PID_SET(0x0010, p_new_pids);
-					// SDT PIDセット
-					PID_SET(0x0011, p_new_pids);
-					// EIT PIDセット
-					PID_SET(0x0012, p_new_pids);
-					PID_SET(0x0026, p_new_pids);
-					PID_SET(0x0027, p_new_pids);
-					// TOT PIDセット
-					PID_SET(0x0014, p_new_pids);
-					// BIT PIDセット
-					PID_SET(0x0024, p_new_pids);
-					// CDT PIDセット
-					PID_SET(0x0029, p_new_pids);
-					// EMM PIDセット
-					if (pidEMM != 0xffff)
-						PID_SET(pidEMM, p_new_pids);
+					if (!(g_dwDelFlag & FLAG_NIT))
+						PID_SET(0x0010, p_new_pids);	// NIT PIDセット
+					if (!(g_dwDelFlag & FLAG_SDT))
+						PID_SET(0x0011, p_new_pids);	// SDT PIDセット
+					if (!(g_dwDelFlag & FLAG_EIT))
+					{
+						PID_SET(0x0012, p_new_pids);	// EIT PIDセット
+						PID_SET(0x0026, p_new_pids);
+						PID_SET(0x0027, p_new_pids);
+					}
+					if (!(g_dwDelFlag & FLAG_TOT))
+						PID_SET(0x0014, p_new_pids);	// TOT PIDセット
+					if (!(g_dwDelFlag & FLAG_BIT))
+						PID_SET(0x0024, p_new_pids);	// BIT PIDセット
+					if (!(g_dwDelFlag & FLAG_CDT))
+						PID_SET(0x0029, p_new_pids);	// CDT PIDセット
+					if (pidEMM != 0xffff)				// FLAG_EMMが立っている時はpidEMMは必ず0xffff
+						PID_SET(pidEMM, p_new_pids);	// EMM PIDセット
 					// PCR PIDセット
 					pid = GetPID(&p[13]);
 					if (pid != 0x1fff)
@@ -1207,7 +1266,8 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 							{
 								// ECM PIDセット(第1ループに無効ECMは来ない / ARIB TR-B14/B15)
 								pid = GetPID(&p[off+4]);
-								PID_SET(pid, p_new_pids);
+								if (!(g_dwDelFlag & FLAG_ECM))
+									PID_SET(pid, p_new_pids);
 							}
 						}
 						off += cdesc_len;
@@ -1254,7 +1314,10 @@ void *cBonDriverDVB::TsSplitter(LPVOID pv)
 									// ECM PIDセット
 									pid = GetPID(&p[coff+4]);
 									if (pid != 0x1fff)
-										PID_SET(pid, p_new_pids);
+									{
+										if (!(g_dwDelFlag & FLAG_ECM))
+											PID_SET(pid, p_new_pids);
+									}
 								}
 							}
 							coff += cdesc_len;
