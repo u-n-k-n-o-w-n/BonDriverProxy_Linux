@@ -24,7 +24,8 @@ typedef unsigned int	DWORD;
 #define TTS_PKTSIZE		192
 #define TS_FEC_PKTSIZE	204
 #define TTS_FEC_PKTSIZE	208
-#define TS_BUFSIZE		(TS_PKTSIZE * 1024 * 87)	// 約16MB
+#define TS_BUFSIZE		(TS_PKTSIZE * 256)
+#define TS_WRITESIZE	(TS_BUFSIZE * 348)	// 約16MB
 
 static DWORD g_Crc32Table[256];
 
@@ -59,6 +60,8 @@ public:
 
 BOOL cTsSync::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 {
+	// 同期チェックの開始位置
+	DWORD dwCheckStartPos = 0;
 	// 既に同期済みか？
 	if (m_dwUnitSize != 0)
 	{
@@ -68,6 +71,8 @@ BOOL cTsSync::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 			{
 				// 今回の入力バッファで同期が崩れてしまうので要再同期
 				m_dwUnitSize = 0;
+				// 今回の入力バッファの先頭から同期の崩れた場所までは破棄する事になる
+				dwCheckStartPos = pos;
 				goto resync;
 			}
 		}
@@ -128,7 +133,7 @@ BOOL cTsSync::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 resync:
 	// 同期処理開始
 	DWORD dwSyncBufPos = m_dwSyncBufPos;
-	for (DWORD off = 0; (off + TS_PKTSIZE) < (dwSyncBufPos + dwSrc); off++)
+	for (DWORD off = dwCheckStartPos; (off + TS_PKTSIZE) < (dwSyncBufPos + dwSrc); off++)
 	{
 		if (((off >= dwSyncBufPos) && (pSrc[off - dwSyncBufPos] == TS_SYNC_BYTE)) || ((off < dwSyncBufPos) && (m_SyncBuf[off] == TS_SYNC_BYTE)))
 		{
@@ -323,10 +328,10 @@ static inline void UpdateStat(pid_stat *p, unsigned short pid, BYTE *pPKT)
 #define FLAG_EMM 0x0100
 static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag, BOOL bModPMT, BOOL bLog)
 {
-	BYTE *pTsBuf, pPAT[TS_PKTSIZE];
+	BYTE *pRawBuf, *pTsBuf, *pWriteBuf, pPAT[TS_PKTSIZE];
 	BYTE pPMT[4104+TS_PKTSIZE];	// 4104 = 8(TSヘッダ + pointer_field + table_idからsection_length) + 4096(セクション長最大値)
 	BYTE pPMTPackets[TS_PKTSIZE*32];
-	int pos, iNumSplit;
+	int pos, iWritePos, iNumSplit;
 	unsigned char pat_ci, rpmt_ci, wpmt_ci, lpmt_version, lcat_version, ver;
 	unsigned short ltsid, pidPMT, pidEMM, pmt_tail;
 	BOOL bChangePMT, bSplitPMT, bEnd, bPMTComplete;
@@ -338,8 +343,10 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 	memset(pidst, 0, sizeof(pidst));
 	for (int i = 0; i < MAX_PID; i++)
 		pidst[i].ci = 0xff;
+	pRawBuf = new BYTE[TS_BUFSIZE];
 	pTsBuf = new BYTE[TS_BUFSIZE];
-	pos = 0;
+	pWriteBuf = new BYTE[TS_WRITESIZE];
+	pos = iWritePos = 0;
 	pat_ci = 0x10;			// 0x1(payloadのみ) << 4 | 0x0(ci初期値)
 	lpmt_version = lcat_version = wpmt_ci = 0xff;
 	ltsid = pidPMT = pidEMM = 0xffff;	// 現在のTSID及びPMT,EMMのPID
@@ -350,7 +357,6 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 	PID_ZERO(p_new_pids);
 	PID_ZERO(p_old_pids);
 
-	BYTE *pRawBuf = new BYTE[TS_BUFSIZE];
 	bEnd = bPMTComplete = FALSE;
 	while (!bEnd)
 	{
@@ -614,8 +620,10 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 							{
 								if (dwServiceID != 0xffffffff)
 								{
-									int len, left = pos;
-									BYTE *p = pTsBuf;
+									memcpy(&pWriteBuf[iWritePos], pTsBuf, pos);
+									iWritePos += pos;
+									int len, left = iWritePos;
+									BYTE *p = pWriteBuf;
 									do
 									{
 										len = fwrite(p, 1, left, wfp);
@@ -627,6 +635,7 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 										p += len;
 										left -= len;
 									} while (left > 0);
+									iWritePos = 0;
 								}
 								pidst[pidPMT].count += iNumSplit;
 								// TS_BUFSIZEは(TS_PKTSIZE * iNumSplit(理論最大値23))より大きい前提
@@ -927,25 +936,31 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 			pSrc += TS_PKTSIZE;
 			dwLeft -= TS_PKTSIZE;
 
-			// 1ループでのposの増加は0もしくはTS_PKTSIZEなので、
-			// バウンダリチェックはこれで大丈夫なハズ
+			// 1ループでのposの増加は0もしくはTS_PKTSIZE、あるいはチェックした上でのTS_PKTSIZE * iNumSplitなので、
+			// ここでのバウンダリチェックはこれで大丈夫なハズ
 			if (pos == TS_BUFSIZE)
 			{
 				if (dwServiceID != 0xffffffff)
 				{
-					int len, left = TS_BUFSIZE;
-					BYTE *p = pTsBuf;
-					do
+					memcpy(&pWriteBuf[iWritePos], pTsBuf, TS_BUFSIZE);
+					iWritePos += TS_BUFSIZE;
+					if (iWritePos == TS_WRITESIZE)
 					{
-						len = fwrite(p, 1, left, wfp);
-						if (len <= 0)
+						int len, left = TS_WRITESIZE;
+						BYTE *p = pWriteBuf;
+						do
 						{
-							fprintf(stderr, "write error.\n");
-							goto end;
-						}
-						p += len;
-						left -= len;
-					} while (left > 0);
+							len = fwrite(p, 1, left, wfp);
+							if (len <= 0)
+							{
+								fprintf(stderr, "write error.\n");
+								goto end;
+							}
+							p += len;
+							left -= len;
+						} while (left > 0);
+						iWritePos = 0;
+					}
 				}
 				pos = 0;
 			}
@@ -953,12 +968,17 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 		delete[] pSrcHead;
 	}
 	// バッファに残っている分を書き出し
-	if (pos != 0)
+	if ((iWritePos != 0) || (pos != 0))
 	{
 		if (dwServiceID != 0xffffffff)
 		{
-			int len, left = pos;
-			BYTE *p = pTsBuf;
+			if (pos != 0)
+			{
+				memcpy(&pWriteBuf[iWritePos], pTsBuf, pos);
+				iWritePos += pos;
+			}
+			int len, left = iWritePos;
+			BYTE *p = pWriteBuf;
 			do
 			{
 				len = fwrite(p, 1, left, wfp);
@@ -985,8 +1005,9 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 	fprintf(stderr, "total %u packets.\n", sum);
 
 end:
-	delete[] pRawBuf;
+	delete[] pWriteBuf;
 	delete[] pTsBuf;
+	delete[] pRawBuf;
 }
 
 static void usage(char *p)

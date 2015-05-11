@@ -1423,6 +1423,8 @@ end:
 
 BOOL cBonDriverDVB::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 {
+	// 同期チェックの開始位置
+	DWORD dwCheckStartPos = 0;
 	// 既に同期済みか？
 	if (m_dwUnitSize != 0)
 	{
@@ -1432,6 +1434,8 @@ BOOL cBonDriverDVB::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 			{
 				// 今回の入力バッファで同期が崩れてしまうので要再同期
 				m_dwUnitSize = 0;
+				// 今回の入力バッファの先頭から同期の崩れた場所までは破棄する事になる
+				dwCheckStartPos = pos;
 				goto resync;
 			}
 		}
@@ -1492,7 +1496,7 @@ BOOL cBonDriverDVB::TsSync(BYTE *pSrc, DWORD dwSrc, BYTE **ppDst, DWORD *pdwDst)
 resync:
 	// 同期処理開始
 	DWORD dwSyncBufPos = m_dwSyncBufPos;
-	for (DWORD off = 0; (off + TS_PKTSIZE) < (dwSyncBufPos + dwSrc); off++)
+	for (DWORD off = dwCheckStartPos; (off + TS_PKTSIZE) < (dwSyncBufPos + dwSrc); off++)
 	{
 		if (((off >= dwSyncBufPos) && (pSrc[off - dwSyncBufPos] == TS_SYNC_BYTE)) || ((off < dwSyncBufPos) && (m_SyncBuf[off] == TS_SYNC_BYTE)))
 		{
