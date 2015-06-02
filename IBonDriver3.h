@@ -24,7 +24,7 @@ public:
 	virtual const DWORD GetTotalDeviceNum(void) = 0;
 	virtual const DWORD GetActiveDeviceNum(void) = 0;
 	virtual const BOOL SetLnbPower(const BOOL bEnable) = 0;
-	
+
 // IBonDriver
 	virtual void Release(void) = 0;
 };
