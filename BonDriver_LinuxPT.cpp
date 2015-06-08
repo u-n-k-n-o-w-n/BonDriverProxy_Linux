@@ -163,7 +163,7 @@ static int Init()
 		else if (!bdelFlag && IsTagMatch(buf, "#DEL", &p))
 		{
 			char *pb = p;
-			const char *name[] = { "CAT", "NIT", "SDT", "EIT", "TOT", "BIT", "CDT", "ECM", "EMM", NULL };
+			const char *name[] = { "EIT", "H-EIT", "M-EIT", "L-EIT", "CAT", "NIT", "SDT", "TOT", "SDTT", "BIT", "CDT", "ECM", "EMM", "TYPED", NULL };
 			int n, cnt = 1;
 			while (*p != '\0')
 			{
@@ -195,7 +195,10 @@ static int Init()
 				{
 					if (strcmp(pp[i], name[j]) == 0)
 					{
-						g_dwDelFlag |= (1 << j);
+						if (j == 0)
+							g_dwDelFlag |= 0x7;		// EIT = H-EIT | M-EIT | L-EIT
+						else
+							g_dwDelFlag |= (1 << (j - 1));
 						break;
 					}
 				}
@@ -686,15 +689,19 @@ end:
 struct pid_set {
 	int bits[MAX_PID / (8 * sizeof(int))];
 };
-#define FLAG_CAT 0x0001
-#define FLAG_NIT 0x0002
-#define FLAG_SDT 0x0004
-#define FLAG_EIT 0x0008
-#define FLAG_TOT 0x0010
-#define FLAG_BIT 0x0020
-#define FLAG_CDT 0x0040
-#define FLAG_ECM 0x0080
-#define FLAG_EMM 0x0100
+#define FLAG_HEIT	0x0001
+#define FLAG_MEIT	0x0002
+#define FLAG_LEIT	0x0004
+#define FLAG_CAT	0x0008
+#define FLAG_NIT	0x0010
+#define FLAG_SDT	0x0020
+#define FLAG_TOT	0x0040
+#define FLAG_SDTT	0x0080
+#define FLAG_BIT	0x0100
+#define FLAG_CDT	0x0200
+#define FLAG_ECM	0x0400
+#define FLAG_EMM	0x0800
+#define FLAG_TYPED	0x1000
 
 void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 {
@@ -1033,16 +1040,18 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						PID_SET(0x0010, p_new_pids);	// NIT PIDセット
 					if (!(g_dwDelFlag & FLAG_SDT))
 						PID_SET(0x0011, p_new_pids);	// SDT PIDセット
-					if (!(g_dwDelFlag & FLAG_EIT))
-					{
-						PID_SET(0x0012, p_new_pids);	// EIT PIDセット
-						PID_SET(0x0026, p_new_pids);
-						PID_SET(0x0027, p_new_pids);
-					}
+					if (!(g_dwDelFlag & FLAG_HEIT))
+						PID_SET(0x0012, p_new_pids);	// H-EIT PIDセット
 					if (!(g_dwDelFlag & FLAG_TOT))
 						PID_SET(0x0014, p_new_pids);	// TOT PIDセット
+					if (!(g_dwDelFlag & FLAG_SDTT))
+						PID_SET(0x0023, p_new_pids);	// SDTT PIDセット
 					if (!(g_dwDelFlag & FLAG_BIT))
 						PID_SET(0x0024, p_new_pids);	// BIT PIDセット
+					if (!(g_dwDelFlag & FLAG_MEIT))
+						PID_SET(0x0026, p_new_pids);	// M-EIT PIDセット
+					if (!(g_dwDelFlag & FLAG_LEIT))
+						PID_SET(0x0027, p_new_pids);	// L-EIT PIDセット
 					if (!(g_dwDelFlag & FLAG_CDT))
 						PID_SET(0x0029, p_new_pids);	// CDT PIDセット
 					if (pidEMM != 0xffff)				// FLAG_EMMが立っている時はpidEMMは必ず0xffff
@@ -1093,7 +1102,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 							bSplitPMT = FALSE;
 							goto next;
 						}
-						if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
+						if ((p[off] != 0x0d) || !(g_dwDelFlag & FLAG_TYPED))	// stream_type "ISO/IEC 13818-6 type D"以外は無条件で残す
 						{
 							pid = GetPID(&p[off+1]);
 							PID_SET(pid, p_new_pids);

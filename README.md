@@ -119,7 +119,8 @@ PMT、CAT、NIT、SDT、EIT、TOT、BIT、CDTの各PSI/SIと、ECM、EMM、そ�
 #DEL=
 ```
 
-には、削除するPSI/SIの名称のリスト(有効な値はCAT, NIT, SDT, EIT, TOT, BIT, CDT, ECM, EMM)を指定できます。DEL=CAT,EIT,BIT,CDTの様に指定します。
+には、削除するPSI/SIの名称のリスト(有効な値はCAT, NIT, SDT, H-EIT, TOT, SDTT, BIT, M-EIT, L-EIT, CDT, ECM, EMM)を指定できます。また、EITを指定するとH-EIT, M-EIT, L-EITの3種を全て指定した場合と同じになります。
+更に、TYPEDを指定するとISO/IEC 13818-6 type DのPIDストリーム(データ放送等で使用されています)が削除されます。DEL=CAT,EIT,SDTT,BIT,CDT,TYPEDの様に指定します。
 なお、ECMを削除するとスクランブルが解除できなくなるので注意して下さい。  
 また、DVB版に関しては、
 
