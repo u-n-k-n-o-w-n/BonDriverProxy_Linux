@@ -73,12 +73,21 @@ static int Init(int ac, char *av[])
 	FILE *fp;
 	char *p, buf[1024];
 
+#ifdef LINUX
+	if (::readlink("/proc/self/exe", buf, sizeof(buf) - 8) == -1)
+		return -2;
+#else
 	Dl_info info;
 	if (::dladdr((void *)Init, &info) == 0)
 		return -2;
 	::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
+#endif
 	buf[sizeof(buf) - 8] = '\0';
 	::strcat(buf, ".conf");
+
+#ifdef DEBUG
+	::fprintf(stderr, "conf: [%s]\n", buf);
+#endif
 
 	fp = ::fopen(buf, "r");
 	if (fp == NULL)
