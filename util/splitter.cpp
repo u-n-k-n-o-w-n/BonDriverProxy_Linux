@@ -317,15 +317,19 @@ static inline void UpdateStat(pid_stat *p, unsigned short pid, BYTE *pPKT)
 		p->ci = 0xff;
 	}
 }
-#define FLAG_CAT 0x0001
-#define FLAG_NIT 0x0002
-#define FLAG_SDT 0x0004
-#define FLAG_EIT 0x0008
-#define FLAG_TOT 0x0010
-#define FLAG_BIT 0x0020
-#define FLAG_CDT 0x0040
-#define FLAG_ECM 0x0080
-#define FLAG_EMM 0x0100
+#define FLAG_HEIT	0x0001
+#define FLAG_MEIT	0x0002
+#define FLAG_LEIT	0x0004
+#define FLAG_CAT	0x0008
+#define FLAG_NIT	0x0010
+#define FLAG_SDT	0x0020
+#define FLAG_TOT	0x0040
+#define FLAG_SDTT	0x0080
+#define FLAG_BIT	0x0100
+#define FLAG_CDT	0x0200
+#define FLAG_ECM	0x0400
+#define FLAG_EMM	0x0800
+#define FLAG_TYPED	0x1000
 static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag, BOOL bModPMT, BOOL bLog)
 {
 	BYTE *pRawBuf, *pTsBuf, *pWriteBuf, pPAT[TS_PKTSIZE];
@@ -583,7 +587,7 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 						if (bLog)
 							fprintf(stderr, "PMT version change: [0x%x] -> [0x%x]\n", lpmt_version, ver);
 						bChangePMT = TRUE;	// PMT更新処理開始
-						bSplitPMT = bPMTComplete = FALSE;
+						bSplitPMT = FALSE;
 						lpmt_version = ver;
 						// 分割PMTをまとめる場合は
 						if (bModPMT)
@@ -610,9 +614,9 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 								else
 									wpmt_ci++;
 							}
+							pidst[pidPMT].count += iNumSplit;
 							if ((pos + (TS_PKTSIZE * iNumSplit)) <= TS_BUFSIZE)
 							{
-								pidst[pidPMT].count += iNumSplit;
 								memcpy(&pTsBuf[pos], pPMTPackets, TS_PKTSIZE * iNumSplit);
 								pos += (TS_PKTSIZE * iNumSplit);
 							}
@@ -637,7 +641,6 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 									} while (left > 0);
 									iWritePos = 0;
 								}
-								pidst[pidPMT].count += iNumSplit;
 								// TS_BUFSIZEは(TS_PKTSIZE * iNumSplit(理論最大値23))より大きい前提
 								memcpy(pTsBuf, pPMTPackets, TS_PKTSIZE * iNumSplit);
 								pos = (TS_PKTSIZE * iNumSplit);
@@ -722,24 +725,25 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 				PID_ZERO(p_new_pids);
 				// PMT PIDセット(マップにセットしても意味無いけど一応)
 				PID_SET(pidPMT, p_new_pids);
-
 				if (!(dwDelFlag & FLAG_NIT))
 					PID_SET(0x0010, p_new_pids);	// NIT PIDセット
 				if (!(dwDelFlag & FLAG_SDT))
 					PID_SET(0x0011, p_new_pids);	// SDT PIDセット
-				if (!(dwDelFlag & FLAG_EIT))
-				{
-					PID_SET(0x0012, p_new_pids);	// EIT PIDセット
-					PID_SET(0x0026, p_new_pids);
-					PID_SET(0x0027, p_new_pids);
-				}
+				if (!(dwDelFlag & FLAG_HEIT))
+					PID_SET(0x0012, p_new_pids);	// H-EIT PIDセット
 				if (!(dwDelFlag & FLAG_TOT))
 					PID_SET(0x0014, p_new_pids);	// TOT PIDセット
+				if (!(dwDelFlag & FLAG_SDTT))
+					PID_SET(0x0023, p_new_pids);	// SDTT PIDセット
 				if (!(dwDelFlag & FLAG_BIT))
 					PID_SET(0x0024, p_new_pids);	// BIT PIDセット
+				if (!(dwDelFlag & FLAG_MEIT))
+					PID_SET(0x0026, p_new_pids);	// M-EIT PIDセット
+				if (!(dwDelFlag & FLAG_LEIT))
+					PID_SET(0x0027, p_new_pids);	// L-EIT PIDセット
 				if (!(dwDelFlag & FLAG_CDT))
 					PID_SET(0x0029, p_new_pids);	// CDT PIDセット
-				if (pidEMM != 0xffff)	// FLAG_EMMが立っている時はpidEMMは必ず0xffff
+				if (pidEMM != 0xffff)				// FLAG_EMMが立っている時はpidEMMは必ず0xffff
 					PID_SET(pidEMM, p_new_pids);	// EMM PIDセット
 				// PCR PIDセット
 				pid = GetPID(&p[13]);
@@ -803,7 +807,7 @@ static void TsSplitter(DWORD dwServiceID, FILE *rfp, FILE *wfp, DWORD dwDelFlag,
 						goto next;
 					}
 					pid = GetPID(&p[off+1]);
-					if (p[off] != 0x0d)	// stream_type "ISO/IEC 13818-6 type D"は破棄
+					if ((p[off] != 0x0d) || !(dwDelFlag & FLAG_TYPED))	// stream_type "ISO/IEC 13818-6 type D"以外は無条件で残す
 					{
 						PID_SET(pid, p_new_pids);
 						if (bLog)
@@ -1022,8 +1026,10 @@ static void usage(char *p)
 	fprintf(stderr, "     : ServiceID = extract ServiceID / default = \"check sid\" mode\n");
 	fprintf(stderr, "     : output = output TS filename / default = stdout\n");
 	fprintf(stderr, "     : deletelist = delete PSI/SI name list(csv)\n");
-	fprintf(stderr, "     :              valid value: CAT, NIT, SDT, EIT, TOT, BIT, CDT, ECM, EMM\n");
-	fprintf(stderr, "     :              e.g. -d \"CAT,EIT,BIT,CDT\"\n");
+	fprintf(stderr, "     :              valid value: CAT, NIT, SDT, H-EIT, TOT, SDTT, BIT, M-EIT, L-EIT, CDT, ECM, EMM\n");
+	fprintf(stderr, "     :                         : or EIT (= H-EIT + M-EIT + L-EIT)\n");
+	fprintf(stderr, "     :                         : or TYPED (stream_type \"ISO/IEC 13818-6 type D\")\n");
+	fprintf(stderr, "     :              e.g. -d \"CAT,EIT,SDTT,BIT,CDT,TYPED\"\n");
 	fprintf(stderr, "     : use \"-m\" option = \"PMT defrag\" enable\n");
 	fprintf(stderr, "     : use \"-v\" option = verbose log enable\n");
 	exit(0);
@@ -1053,9 +1059,12 @@ static int getopt(int argc, char *argv[], const char *tag)
 				i++;
 			if (tag[i] == '\0')
 				break;
-			tags[ntag].tag = tag[i++];
-			if (tag[i] == ':')
+			tags[ntag].tag = tag[i];
+			if (tag[i + 1] == ':')
+			{
 				tags[ntag].havearg = 1;
+				i++;
+			}
 			ntag++;
 			if (ntag >= TAG_MAX)
 				break;
@@ -1086,7 +1095,7 @@ int main(int argc, char *argv[])
 {
 	int opt, sfind, ifind, ofind, mfind, vfind;
 	char *input, *output, *dlist = NULL;
-	const char *name[] = {"CAT", "NIT", "SDT", "EIT", "TOT", "BIT", "CDT", "ECM", "EMM", NULL};
+	const char *name[] = { "EIT", "H-EIT", "M-EIT", "L-EIT", "CAT", "NIT", "SDT", "TOT", "SDTT", "BIT", "CDT", "ECM", "EMM", "TYPED", NULL };
 	DWORD dflag = 0, sid = 0xffffffff;
 	FILE *rfp, *wfp;
 
@@ -1168,7 +1177,10 @@ int main(int argc, char *argv[])
 			{
 				if (strcmp(pp[i], name[j]) == 0)
 				{
-					dflag |= (1 << j);
+					if (j == 0)
+						dflag |= 0x7;		// EIT = H-EIT | M-EIT | L-EIT
+					else
+						dflag |= (1 << (j - 1));
 					break;
 				}
 			}
