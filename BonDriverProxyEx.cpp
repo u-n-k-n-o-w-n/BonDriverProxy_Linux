@@ -74,15 +74,17 @@ static int Init(int ac, char *av[])
 	char *p, buf[1024];
 
 #ifdef LINUX
-	if (::readlink("/proc/self/exe", buf, sizeof(buf) - 8) == -1)
+	ssize_t len;
+	if ((len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 8)) == -1)
 		return -2;
+	buf[len] = '\0';
 #else
 	Dl_info info;
 	if (::dladdr((void *)Init, &info) == 0)
 		return -2;
 	::strncpy(buf, info.dli_fname, sizeof(buf) - 8);
-#endif
 	buf[sizeof(buf) - 8] = '\0';
+#endif
 	::strcat(buf, ".conf");
 
 #ifdef DEBUG
