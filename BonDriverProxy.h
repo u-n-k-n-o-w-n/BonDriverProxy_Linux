@@ -65,6 +65,7 @@ struct stTsReaderArg {
 	volatile BOOL ChannelChanged;
 	DWORD pos;
 	std::list<cProxyServer *> TsReceiversList;
+	std::list<cProxyServer *> WaitExclusivePrivList;
 	cCriticalSection TsLock;
 	stTsReaderArg()
 	{
@@ -85,7 +86,7 @@ class cProxyServer {
 	cEvent m_Error;
 	char m_strBonDriver[BONDRIVER_PATH_MAX];
 	BOOL m_bTunerOpen;
-	BOOL m_bChannelLock;
+	BYTE m_bChannelLock;
 	DWORD m_tRet;
 	pthread_t m_hTsRead;
 	stTsReaderArg *m_pTsReaderArg;

@@ -180,7 +180,8 @@ cProxyServerEx::cProxyServerEx() : m_Error(m_c, m_m), m_fifoSend(m_c, m_m), m_fi
 	m_s = INVALID_SOCKET;
 	m_hModule = NULL;
 	m_pIBon = m_pIBon2 = m_pIBon3 = NULL;
-	m_bTunerOpen = m_bChannelLock = FALSE;
+	m_bTunerOpen = FALSE;
+	m_bChannelLock = 0;
 	m_hTsRead = 0;
 	m_pTsReaderArg = NULL;
 	m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
@@ -342,7 +343,7 @@ DWORD cProxyServerEx::Process()
 						else if (::strcmp(p, ":asc") == 0)	// 昇順
 							*p = '\0';
 					}
-					BOOL b = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload));
+					BOOL b = SelectBonDriver((LPCSTR)(pPh->m_pPacket->payload), 0);
 					if (b)
 						g_InstanceList.push_back(this);
 					makePacket(eSelectBonDriver, b);
@@ -448,6 +449,8 @@ DWORD cProxyServerEx::Process()
 					if (m_hTsRead)
 						StopTsReceive();
 				}
+				m_bChannelLock = 0;
+				m_dwSpace = m_dwChannel = 0x7fffffff;	// INT_MAX
 				m_hTsRead = 0;
 				m_pTsReaderArg = NULL;
 				m_bTunerOpen = FALSE;
@@ -456,11 +459,17 @@ DWORD cProxyServerEx::Process()
 
 			case ePurgeTsStream:
 			{
-				if (m_hTsRead && m_bChannelLock)
+				if (m_hTsRead)
 				{
 					m_pTsReaderArg->TsLock.Enter();
-					PurgeTsStream();
-					m_pTsReaderArg->pos = 0;
+					if (m_pTsReaderArg->TsReceiversList.size() <= 1)
+					{
+						PurgeTsStream();
+						m_pTsReaderArg->pos = 0;
+					}
+#ifdef DEBUG
+					::fprintf(stderr, "ePurgeTsStream : [%d] / size[%zu]\n", (m_pTsReaderArg->TsReceiversList.size() <= 1) ? 1 : 0, m_pTsReaderArg->TsReceiversList.size());
+#endif
 					m_pTsReaderArg->TsLock.Leave();
 					makePacket(ePurgeTsStream, TRUE);
 				}
@@ -524,7 +533,7 @@ DWORD cProxyServerEx::Process()
 					makePacket(eSetChannel2, (DWORD)0xff);
 				else
 				{
-					m_bChannelLock = pPh->m_pPacket->payload[sizeof(DWORD) * 2];
+					BYTE bChannelLock = pPh->m_pPacket->payload[sizeof(DWORD) * 2];
 					DWORD *pdw1 = (DWORD *)(pPh->m_pPacket->payload);
 					DWORD *pdw2 = (DWORD *)(&(pPh->m_pPacket->payload[sizeof(DWORD)]));
 					DWORD dwReqSpace = ntohl(*pdw1);
@@ -532,9 +541,54 @@ DWORD cProxyServerEx::Process()
 					if ((dwReqSpace == m_dwSpace) && (dwReqChannel == m_dwChannel))
 					{
 						// 既にリクエストされたチャンネルを選局済み
-#if DEBUG
+#ifdef DEBUG
 						::fprintf(stderr, "** already tuned! ** : m_dwSpace[%d] / m_dwChannel[%d]\n", dwReqSpace, dwReqChannel);
 #endif
+						// 必ずtrueのハズだけど、一応
+						if (m_hTsRead)
+						{
+							// このインスタンスが要求している優先度が255であった場合に
+							if (bChannelLock == 0xff)
+							{
+								// 現在の配信リストには優先度255のインスタンスが既にいるか？
+								BOOL bFind = FALSE;
+								m_pTsReaderArg->TsLock.Enter();
+								std::list<cProxyServerEx *>::iterator it = m_pTsReaderArg->TsReceiversList.begin();
+								while (it != m_pTsReaderArg->TsReceiversList.end())
+								{
+									if ((*it != this) && ((*it)->m_bChannelLock == 0xff))
+									{
+										bFind = TRUE;
+										break;
+									}
+									++it;
+								}
+								m_pTsReaderArg->TsLock.Leave();
+								if (bFind)
+								{
+									// いた場合は、このインスタンスの優先度を暫定的に254にする
+									bChannelLock = 0xfe;
+									// 排他権取得待ちリストにまだ自身が含まれていなければ追加
+									bFind = FALSE;
+									it = m_pTsReaderArg->WaitExclusivePrivList.begin();
+									while (it != m_pTsReaderArg->WaitExclusivePrivList.end())
+									{
+										if (*it == this)
+										{
+											bFind = TRUE;
+											break;
+										}
+										++it;
+									}
+									if (!bFind)
+										m_pTsReaderArg->WaitExclusivePrivList.push_back(this);
+#ifdef DEBUG
+									::fprintf(stderr, "** exclusive tuner! ** : wait-exclusivepriv-list size[%zu] / added[%d]\n", m_pTsReaderArg->WaitExclusivePrivList.size(), bFind ? 0 : 1);
+#endif
+								}
+							}
+						}
+						m_bChannelLock = bChannelLock;
 						makePacket(eSetChannel2, (DWORD)0x00);
 					}
 					else
@@ -543,6 +597,7 @@ DWORD cProxyServerEx::Process()
 						BOOL bLocked = FALSE;
 						BOOL bShared = FALSE;
 						BOOL bSetChannel = FALSE;
+						cProxyServerEx *pHavePriv = NULL;
 						for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 						{
 							if (*it == this)
@@ -625,6 +680,28 @@ DWORD cProxyServerEx::Process()
 										}
 									}
 
+									// このインスタンスが要求している優先度が255であった場合に
+									if (bChannelLock == 0xff)
+									{
+										// 切り替え先チューナに対して優先度255のインスタンスが既にいるか？
+										for (std::list<cProxyServerEx *>::iterator it2 = g_InstanceList.begin(); it2 != g_InstanceList.end(); ++it2)
+										{
+											if (*it2 == this)
+												continue;
+											if ((*it2)->m_pIBon == (*it)->m_pIBon)
+											{
+												if ((*it2)->m_bChannelLock == 0xff)
+												{
+													// いた場合は、このインスタンスの優先度を暫定的に254にする
+													// (そうしないと、優先度255のインスタンスもチャンネル変更できなくなる為)
+													bChannelLock = 0xfe;
+													pHavePriv = *it2;
+													break;
+												}
+											}
+										}
+									}
+
 									// インスタンス切り替え
 									m_hModule = (*it)->m_hModule;
 									m_iDriverNo = (*it)->m_iDriverNo;
@@ -642,8 +719,38 @@ DWORD cProxyServerEx::Process()
 									}
 #ifdef DEBUG
 									::fprintf(stderr, "** found! ** : m_hModule[%p] / m_iDriverNo[%d] / m_pIBon[%p]\n", m_hModule, m_iDriverNo, m_pIBon);
-									::fprintf(stderr, "             : m_dwSpace[%d] / m_dwChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
+									::fprintf(stderr, "             : m_dwSpace[%d] / m_dwChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, bChannelLock);
 #endif
+									// このインスタンスの優先度が下げられた場合
+									if (pHavePriv != NULL)
+									{
+										if (m_hTsRead)
+										{
+											// 排他権取得待ちリストにまだ自身が含まれていなければ追加
+											BOOL bFind = FALSE;
+											std::list<cProxyServerEx *>::iterator it2 = m_pTsReaderArg->WaitExclusivePrivList.begin();
+											while (it2 != m_pTsReaderArg->WaitExclusivePrivList.end())
+											{
+												if (*it2 == this)
+												{
+													bFind = TRUE;
+													break;
+												}
+												++it2;
+											}
+											if (!bFind)
+												m_pTsReaderArg->WaitExclusivePrivList.push_back(this);
+#ifdef DEBUG
+											::fprintf(stderr, "** exclusive tuner! ** : wait-exclusivepriv-list size[%zu] / added[%d]\n", m_pTsReaderArg->WaitExclusivePrivList.size(), bFind ? 0 : 1);
+#endif
+										}
+										else
+										{
+											// この処理の意図は少し下の同じ処理のコメント参照
+											pHavePriv->m_bChannelLock = 0;
+											bChannelLock = 0xff;
+										}
+									}
 									goto ok;	// これは酷い
 								}
 							}
@@ -654,7 +761,7 @@ DWORD cProxyServerEx::Process()
 						{
 							// 出来れば未使用、無理ならなるべくロックされてないチューナを選択して、
 							// 一気にチューナオープン状態にまで持って行く
-							if (SelectBonDriver(m_pDriversMapKey))
+							if (SelectBonDriver(m_pDriversMapKey, bChannelLock))
 							{
 								if (m_pIBon == NULL)
 								{
@@ -689,20 +796,63 @@ DWORD cProxyServerEx::Process()
 							{
 								if (*it == this)
 									continue;
-								if ((m_pIBon == (*it)->m_pIBon) && (*it)->m_bChannelLock)
+								if (m_pIBon == (*it)->m_pIBon)
 								{
-									bLocked = TRUE;
-									break;
+									if ((*it)->m_bChannelLock > bChannelLock)
+										bLocked = TRUE;
+									else if ((*it)->m_bChannelLock == 0xff)
+									{
+										// 対象チューナに対して優先度255のインスタンスが既にいる状態で、このインスタンスが
+										// 要求している優先度も255の場合、このインスタンスの優先度を暫定的に254にする
+										// (そうしないと、優先度255のインスタンスもチャンネル変更できなくなる為)
+										bChannelLock = 0xfe;
+										bLocked = TRUE;
+										pHavePriv = *it;
+									}
+									if (bLocked)
+										break;
+								}
+							}
+							// このインスタンスの優先度が下げられた場合
+							if (pHavePriv != NULL)
+							{
+								if (m_hTsRead)
+								{
+									// 排他権取得待ちリストにまだ自身が含まれていなければ追加
+									BOOL bFind = FALSE;
+									std::list<cProxyServerEx *>::iterator it = m_pTsReaderArg->WaitExclusivePrivList.begin();
+									while (it != m_pTsReaderArg->WaitExclusivePrivList.end())
+									{
+										if (*it == this)
+										{
+											bFind = TRUE;
+											break;
+										}
+										++it;
+									}
+									if (!bFind)
+										m_pTsReaderArg->WaitExclusivePrivList.push_back(this);
+#ifdef DEBUG
+									::fprintf(stderr, "** exclusive tuner! ** : wait-exclusivepriv-list size[%zu] / added[%d]\n", m_pTsReaderArg->WaitExclusivePrivList.size(), bFind ? 0 : 1);
+#endif
+								}
+								else
+								{
+									// このインスタンスの優先度が下げられたが、排他権を持っているインスタンスへの配信が
+									// 開始されていない場合は、そのインスタンスから排他権を奪う
+									// こうする事が挙動として望ましいのかどうかは微妙だが、そもそもここに来るのは、
+									// 当該インスタンスでのSetChannel()の失敗後、何もせずに接続だけ続けている状態であり、
+									// 可能性としてはゼロではないものの、かなりのレアケースに限られるはず
+									pHavePriv->m_bChannelLock = 0;
+									bChannelLock = 0xff;
 								}
 							}
 						}
-
 #ifdef DEBUG
 						::fprintf(stderr, "eSetChannel2 : bShared[%d] / bLocked[%d]\n", bShared, bLocked);
-						::fprintf(stderr, "             : dwReqSpace[%d] / dwReqChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, m_bChannelLock);
+						::fprintf(stderr, "             : dwReqSpace[%d] / dwReqChannel[%d] / m_bChannelLock[%d]\n", dwReqSpace, dwReqChannel, bChannelLock);
 #endif
-
-						if (bLocked && !m_bChannelLock)
+						if (bLocked)
 						{
 							// ロックされてる時は単純にロックされてる事を通知
 							// この場合クライアントアプリへのSetChannel()の戻り値は成功になる
@@ -734,6 +884,7 @@ DWORD cProxyServerEx::Process()
 							ok:
 								m_dwSpace = dwReqSpace;
 								m_dwChannel = dwReqChannel;
+								m_bChannelLock = bChannelLock;
 								makePacket(eSetChannel2, (DWORD)0x00);
 								if (m_hTsRead == 0)
 								{
@@ -1108,6 +1259,25 @@ void cProxyServerEx::StopTsReceive()
 		++it;
 	}
 	m_pTsReaderArg->TsLock.Leave();
+
+	// このインスタンスはチャンネル排他権を持っているか？
+	if (m_bChannelLock == 0xff)
+	{
+		// 持っていた場合は、排他権取得待ちのインスタンスは存在しているか？
+		if (m_pTsReaderArg->WaitExclusivePrivList.size() > 0)
+		{
+			// 存在する場合は、リスト先頭のインスタンスに排他権を引き継ぎ、リストから削除
+			cProxyServerEx *p = m_pTsReaderArg->WaitExclusivePrivList.front();
+			m_pTsReaderArg->WaitExclusivePrivList.pop_front();
+			p->m_bChannelLock = 0xff;
+		}
+	}
+	else
+	{
+		// 持っていない場合は、排他権取得待ちリストに自身が含まれているかもしれないので削除
+		m_pTsReaderArg->WaitExclusivePrivList.remove(this);
+	}
+
 	// 自分が最後の受信者だった場合は、TS配信スレッドも停止
 	if (m_pTsReaderArg->TsReceiversList.empty())
 	{
@@ -1119,7 +1289,7 @@ void cProxyServerEx::StopTsReceive()
 	}
 }
 
-BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
+BOOL cProxyServerEx::SelectBonDriver(LPCSTR p, BYTE bChannelLock)
 {
 	char *pKey = NULL;
 	std::vector<stDriver> *pvstDriver = NULL;
@@ -1197,36 +1367,9 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		}
 	}
 
-	// eSetChannel2からの呼び出しの場合
-	if (m_pIBon)
-	{
-		// まず現在のインスタンスがチャンネルロックされてるかどうかチェックする
-		std::list<cProxyServerEx *>::iterator it;
-		BOOL bLocked = FALSE;
-		for (it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
-		{
-			if (*it == this)
-				continue;
-			if (m_hModule == (*it)->m_hModule)
-			{
-				if ((*it)->m_bChannelLock)	// ロックされてた
-				{
-					bLocked = TRUE;
-					break;
-				}
-			}
-		}
-		if (!bLocked)	// ロックされてなければインスタンスはそのままでOK
-			return TRUE;
-
-		// ここまで粘ったけど結局インスタンスが変わる可能性が大なので、
-		// 現在TSストリーム配信中ならその配信対象リストから自身を削除
-		if (m_hTsRead)
-			StopTsReceive();
-	}
-
-	// 全部使われてたら(あるいはdlopen()出来なければ)、チャンネルロックされておらず、
-	// BonDriverのロード時刻(もしくは使用要求時刻)が古いのを優先で選択
+	// 全部使われてたら(あるいはdlopen()出来なければ)、あるインスタンスを使用している
+	// クライアント群のチャンネル優先度の最大値が最も低いインスタンスを選択する
+	// 同値の物が複数あった場合はBonDriverのロード時刻(もしくは使用要求時刻)が古い物を優先
 	cProxyServerEx *pCandidate = NULL;
 	std::vector<cProxyServerEx *> vpCandidate;
 	for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
@@ -1253,7 +1396,7 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 					continue;
 				if (pCandidate->m_hModule == (*it2)->m_hModule)
 				{
-					if ((*it2)->m_bChannelLock)	// ロックされてた
+					if (((*it2)->m_bChannelLock > bChannelLock) || ((*it2)->m_bChannelLock == 0xff))	// ロックされてた
 					{
 						bLocked = TRUE;
 						break;
@@ -1265,26 +1408,116 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		}
 	}
 
+#ifdef DEBUG
+	::fprintf(stderr, "** SelectBonDriver ** : vpCandidate.size[%zd]\n", vpCandidate.size());
+#endif
+
 	// 候補リストが空でなければ(==ロックされていないインスタンスがあったなら)
 	if (vpCandidate.size() != 0)
 	{
-		// BonDriverのロード時刻が一番古いのを探す
 		pCandidate = vpCandidate[0];
+		// 候補に選択の余地はあるか？
 		if (vpCandidate.size() > 1)
 		{
-			// time_tが32ビットの環境では2038年問題が発生するけど放置
-			time_t t = vstDriver[vpCandidate[0]->m_iDriverNo].tLoad;
-			for (i = 1; i < (int)vpCandidate.size(); i++)
+			// 接続クライアント群のチャンネル優先度の最大値が最も低いインスタンスを探す
+			// なお若干ややこしいが、自身が排他権を持っており、かつ排他権取得待ちがいた場合も、
+			// 元のインスタンスはこの時点での候補リストに含まれている
+			BYTE bGroupMaxPriv, bMinPriv;
+			std::vector<BYTE> vbGroupMaxPriv(vpCandidate.size());
+			bMinPriv = 0xff;
+			for (i = 0; i < (int)vpCandidate.size(); i++)
 			{
-				if (t > vstDriver[vpCandidate[i]->m_iDriverNo].tLoad)
+				bGroupMaxPriv = 0;
+				for (std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin(); it != g_InstanceList.end(); ++it)
 				{
-					t = vstDriver[vpCandidate[i]->m_iDriverNo].tLoad;
-					pCandidate = vpCandidate[i];
+					if (*it == this)
+						continue;
+					if (vpCandidate[i]->m_hModule == (*it)->m_hModule)
+					{
+						if ((*it)->m_bChannelLock > bGroupMaxPriv)
+							bGroupMaxPriv = (*it)->m_bChannelLock;
+					}
+				}
+				vbGroupMaxPriv[i] = bGroupMaxPriv;
+				if (bMinPriv > bGroupMaxPriv)
+					bMinPriv = bGroupMaxPriv;
+			}
+			std::vector<cProxyServerEx *> vpCandidate2;
+			for (i = 0; i < (int)vpCandidate.size(); i++)
+			{
+#ifdef DEBUG
+				::fprintf(stderr, "                      : vbGroupMaxPriv[%d] : [%d]\n", i, vbGroupMaxPriv[i]);
+#endif
+				if (vbGroupMaxPriv[i] == bMinPriv)
+					vpCandidate2.push_back(vpCandidate[i]);
+			}
+#ifdef DEBUG
+			::fprintf(stderr, "                      : vpCandidate2.size[%zd]\n", vpCandidate2.size());
+#endif
+			// eSetChannel2からの呼び出しの場合
+			if (m_pIBon)
+			{
+				for (i = 0; i < (int)vpCandidate2.size(); i++)
+				{
+					// この時点での候補リストに現在のインスタンスが含まれていた場合は
+					if (m_hModule == vpCandidate2[i]->m_hModule)
+					{
+						// 現在のインスタンスを継続使用
+						// 「同値の物が複数あった場合はBonDriverのロード時刻(もしくは使用要求時刻)が古い物を優先」
+						// が守られない事になる場合もあるが、効率優先
+						vstDriver[m_iDriverNo].tLoad = tNow;
+						return TRUE;
+					}
+				}
+			}
+
+			// vpCandidate2.size()が1以上なのは保証されている
+			pCandidate = vpCandidate2[0];
+			// インスタンス毎の最大優先度の最小値が複数インスタンスで同値であった場合
+			if (vpCandidate2.size() > 1)
+			{
+				// BonDriverのロード時刻が一番古いのを探す
+				// time_tが32ビットの環境では2038年問題が発生するけど放置
+				time_t t = vstDriver[vpCandidate2[0]->m_iDriverNo].tLoad;
+				for (i = 1; i < (int)vpCandidate2.size(); i++)
+				{
+					if (t > vstDriver[vpCandidate2[i]->m_iDriverNo].tLoad)
+					{
+						t = vstDriver[vpCandidate2[i]->m_iDriverNo].tLoad;
+						pCandidate = vpCandidate2[i];
+					}
 				}
 			}
 		}
-		// 使用するBonDriverのロード時刻(使用要求時刻)を現在時刻で更新
-		vstDriver[pCandidate->m_iDriverNo].tLoad = tNow;
+		else
+		{
+			// eSetChannel2からの呼び出しの場合
+			if (m_pIBon)
+			{
+				// 唯一の候補が現在のインスタンスと同じだった場合は
+				if (m_hModule == pCandidate->m_hModule)
+				{
+					// 現在のインスタンスを継続使用
+					vstDriver[m_iDriverNo].tLoad = tNow;
+					return TRUE;
+				}
+			}
+		}
+
+		// eSetChannel2からの呼び出しの場合かつ現在TSストリーム配信中だったなら、
+		// インスタンスが切り替わるので、現在の配信対象リストから自身を削除
+		if (m_pIBon && m_hTsRead)
+			StopTsReceive();
+	}
+	else
+	{
+		// eSetChannel2からの呼び出しの場合
+		if (m_pIBon)
+		{
+			// ロックされていないインスタンスが無かったので現在のインスタンスを継続使用
+			vstDriver[m_iDriverNo].tLoad = tNow;
+			return TRUE;
+		}
 	}
 
 	// NULLである事は無いハズだけど
@@ -1301,6 +1534,8 @@ BOOL cProxyServerEx::SelectBonDriver(LPCSTR p)
 		m_pTsReaderArg = pCandidate->m_pTsReaderArg;
 		m_dwSpace = pCandidate->m_dwSpace;
 		m_dwChannel = pCandidate->m_dwChannel;
+		// 使用するBonDriverのロード時刻(使用要求時刻)を現在時刻で更新
+		vstDriver[m_iDriverNo].tLoad = tNow;
 	}
 
 	// 選択したインスタンスが既にTSストリーム配信中なら、その配信対象リストに自身を追加

@@ -27,12 +27,12 @@ namespace BonDriver_Proxy {
 static char g_Host[MAX_HOST_LEN];
 static char g_Port[MAX_PORT_LEN];
 static char g_BonDriver[512];
-static BOOL g_ChannelLock = FALSE;
+static BYTE g_ChannelLock;
 static size_t g_PacketFifoSize = 32;
 static size_t g_TsFifoSize = 64;
 static DWORD g_TsPacketBufSize = (188 * 1024);
 static int g_ConnectTimeOut = 5;
-static BOOL g_UseMagicPacket = FALSE;
+static BOOL g_UseMagicPacket;
 static char g_TargetMac[6];
 static char g_TargetHost[MAX_HOST_LEN];
 static char g_TargetPort[MAX_PORT_LEN];
@@ -107,7 +107,7 @@ class cProxyClient : public IBonDriver3 {
 	void makePacket(enumCommand eCmd, BOOL b);
 	void makePacket(enumCommand eCmd, DWORD dw);
 	void makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2);
-	void makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2, BOOL b);
+	void makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2, BYTE b);
 	static void *Sender(LPVOID pv);
 	void TsFlush(){ m_fifoTS.Flush(); }
 //	void SleepLock(int n){ while (m_iEndCount != n){ ::usleep(1000); }; }

@@ -73,7 +73,7 @@ static int Init()
 		}
 		else if (!bChannelLock && IsTagMatch(buf, "CHANNEL_LOCK", &p))
 		{
-			g_ChannelLock = ::atoi(p);
+			g_ChannelLock = (BYTE)::atoi(p);
 			bChannelLock = TRUE;
 		}
 		else if (!bConnectTimeOut && IsTagMatch(buf, "CONNECT_TIMEOUT", &p))
@@ -545,13 +545,13 @@ void cProxyClient::makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2)
 	m_fifoSend.Push(p);
 }
 
-void cProxyClient::makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2, BOOL b)
+void cProxyClient::makePacket(enumCommand eCmd, DWORD dw1, DWORD dw2, BYTE b)
 {
 	cPacketHolder *p = new cPacketHolder(eCmd, (sizeof(DWORD) * 2) + sizeof(BYTE));
 	DWORD *pos = (DWORD *)(p->m_pPacket->payload);
 	*pos++ = htonl(dw1);
 	*pos++ = htonl(dw2);
-	*(BYTE *)pos = (BYTE)b;
+	*(BYTE *)pos = b;
 	m_fifoSend.Push(p);
 }
 
