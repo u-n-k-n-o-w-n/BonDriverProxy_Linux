@@ -4,6 +4,7 @@ BonDriverProxyEx
 sample
 util/test
 util/udpsend
+util/splitter
 
 ### user config ###
 *.so.*
