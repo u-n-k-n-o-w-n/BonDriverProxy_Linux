@@ -772,7 +772,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						if (pid != 0x0000)	// 対象ServiceIDのPMTのPIDが取得できた
 						{
 							// transport_stream_id
-							unsigned short tsid = ((unsigned short )pSrc[8] << 8) | pSrc[9];
+							unsigned short tsid = ((unsigned short)pSrc[8] << 8) | pSrc[9];
 							if (pidPMT != pid || ltsid != tsid)	// PMTのPIDが更新された or チャンネルが変更された
 							{
 								// TSヘッダ
@@ -888,7 +888,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						}
 					}
 				}
-				else if(pid == pidPMT)	// PMT
+				else if (pid == pidPMT)	// PMT
 				{
 					// ビットエラーがあったら無視
 					if (pSrc[1] & 0x80)
@@ -1173,7 +1173,7 @@ void *cBonDriverLinuxPT::TsSplitter(LPVOID pv)
 						{
 							// TSヘッダを除いた残りデータサイズ
 							// 4 = pointer_fieldの1バイト + 上のと同じ3バイト
-							int left = 4 + len;
+							left = 4 + len;
 							// このPMTをいくつのTSパケットに分割する必要があるか
 							iNumSplit = ((left - 1) / (TS_PKTSIZE - 4)) + 1;
 							::memset(pPMTPackets, 0xff, (TS_PKTSIZE * iNumSplit));
