@@ -200,6 +200,10 @@ LICENSE参照。
 Jun/18/2014 unknown <unknown_@live.jp>
 
 ## 更新履歴
+* version 1.1.8.0 (Apr/19/2016)
+	* BonDriver_Splitterを追加した  
+	  設定方法はサンプルの設定ファイル(BonDriver_Splitter.conf)参照
+
 * version 1.1.7.0 (Sep/30/2015)
 	* チャンネルロック機能で先行優先の排他ロックを可能にした  
 	  ※ついでに設定方式を数値による優先度指定方式にした
