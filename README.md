@@ -200,6 +200,10 @@ LICENSE参照。
 Jun/18/2014 unknown <unknown_@live.jp>
 
 ## 更新履歴
+* version 1.1.8.1 (Apr/20/2016)
+	* BonDriver_Splitterの設定ファイルのパース処理にkeyとvalueへのtrim的な処理を追加したのと、  
+	  設定ファイル末尾に改行が無かった場合への念の為の対策を追加した
+
 * version 1.1.8.0 (Apr/19/2016)
 	* BonDriver_Splitterを追加した  
 	  設定方法はサンプルの設定ファイル(BonDriver_Splitter.conf)参照
