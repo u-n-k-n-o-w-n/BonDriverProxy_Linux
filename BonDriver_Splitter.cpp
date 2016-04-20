@@ -4,7 +4,6 @@ namespace BonDriver_Splitter {
 
 static std::vector<std::string> g_vBonDrivers;
 static std::vector<stSpace> g_vstSpace;
-static DWORD g_TsPacketBufSize;
 static DWORD g_Crc32Table[256];
 static BOOL g_ModPMT;
 static BOOL g_TsSync;
@@ -111,7 +110,7 @@ static char *LoadSection(char *p, const char * const end, std::map<std::string, 
 		if ((*p != ';') && (*p != '\n'))
 		{
 			// 行頭の空白は読み飛ばす
-			while ((*p == ' ') || (*p == '\t'))
+			while ((p < end) && ((*p == ' ') || (*p == '\t')))
 				p++;
 			// 内容がある行なら
 			if ((p < end) && (*p != '\n'))
@@ -119,15 +118,36 @@ static char *LoadSection(char *p, const char * const end, std::map<std::string, 
 				const char * const k = p;
 				while ((p < end) && (*p != '='))
 					p++;
-				if (*p == '=')
-					*p++ = '\0';
-				const char * const v = (p < end) ? p : "";
-				while ((p < end) && (*p != '\n'))
-					p++;
+				// 先頭が'='だった(==keyが無かった)場合は無視
+				if (p == k)
+				{
+					*p = ';';
+					continue;
+				}
+				// 「key=」の形がみつかったなら
 				if (p < end)
+				{
+					char *q = p - 1;
+					// keyに末尾空白がある場合は削除
+					while ((q > k) && ((*q == ' ') || (*q == '\t')))
+						*q-- = '\0';
 					*p++ = '\0';
-				// keyとvalueのペアを保存
-				section.insert(std::make_pair<std::string, std::string>(k, v));
+					// valueの先頭空白は読み飛ばす
+					while ((p < end) && ((*p == ' ') || (*p == '\t')))
+						p++;
+
+					const char * const v = (p < end) ? p : "";
+					while ((p < end) && (*p != '\n'))
+						p++;
+					q = p - 1;
+					// valueに末尾空白がある場合は削除
+					while ((*q == ' ') || (*q == '\t'))
+						*q-- = '\0';
+					if (p < end)
+						*p++ = '\0';
+					// keyとvalueのペアを保存
+					section.insert(std::make_pair<std::string, std::string>(k, v));
+				}
 			}
 		}
 		else
@@ -168,7 +188,7 @@ static int Init()
 		return -3;
 	}
 
-	char *body = new char[stbuf.st_size];
+	char *body = new char[stbuf.st_size + 1];
 	size_t len, left = stbuf.st_size;
 	p = body;
 	while (left > 0)
@@ -178,6 +198,7 @@ static int Init()
 		p += len;
 		left -= len;
 	}
+	*p = '\0';
 	::fclose(fp);
 	if (left > 0)
 	{
@@ -230,7 +251,6 @@ static int Init()
 	g_ModPMT = 0;
 	g_TsSync = 0;
 	g_dwDelFlag = 0;
-	g_TsPacketBufSize = TS_BUFSIZE;
 	std::map<std::string, std::map<std::string, std::string> >::iterator it = config.find("#OPTION");
 	if (it != config.end())
 	{
@@ -357,7 +377,7 @@ static int Init()
 		if (v != it->second.end())
 			sname = v->second;
 		else
-			sname = section;
+			sname = &section[1];
 		if (Convert(const_cast<char *>(sname.c_str()), s.SpaceName, MAX_SPACE_SIZE) < 0)
 		{
 			::fprintf(stderr, "Convert() error(Space name): [%s]\n", sname.c_str());
@@ -468,9 +488,9 @@ static int Init()
 		}
 		::fprintf(stderr, "-----\n");
 	}
-	::fprintf(stderr, "g_TsFifoSize[%u] g_TsPacketBufSize[%u]\ng_ModPMT[%s] g_TsSync[%s] g_dwDelFlag[0x%x]\n",
+	::fprintf(stderr, "g_TsFifoSize[%u] TS_BUFSIZE[%u]\ng_ModPMT[%s] g_TsSync[%s] g_dwDelFlag[0x%x]\n",
 		(DWORD)g_TsFifoSize,
-		g_TsPacketBufSize,
+		TS_BUFSIZE,
 		g_ModPMT ? "TRUE" : "FALSE",
 		g_TsSync ? "TRUE" : "FALSE",
 		g_dwDelFlag);
