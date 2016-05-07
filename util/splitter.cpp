@@ -1079,13 +1079,20 @@ static int getopt(int argc, char *argv[], const char *tag)
 			if (argv[i][1] == tags[j].tag)
 			{
 				if (tags[j].havearg)
+				{
+					if (i >= (argc - 1))
+					{
+						index = i + 1;
+						return '?';
+					}
 					optarg = argv[++i];
+				}
 				index = i + 1;
 				return tags[j].tag;
 			}
 		}
 		index = i + 1;
-		return argv[i][1];
+		return '?';
 	}
 	return -1;
 }
