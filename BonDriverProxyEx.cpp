@@ -313,8 +313,10 @@ DWORD cProxyServerEx::Process()
 					"eGetTotalDeviceNum",
 					"eGetActiveDeviceNum",
 					"eSetLnbPower",
+
+					"eGetClientInfo",
 				};
-				if (pPh->GetCommand() <= eSetLnbPower)
+				if (pPh->GetCommand() <= eGetClientInfo)
 				{
 					::fprintf(stderr, "Recieve Command : [%s]\n", CommandName[pPh->GetCommand()]);
 				}
@@ -950,6 +952,89 @@ DWORD cProxyServerEx::Process()
 					makePacket(eSetLnbPower, FALSE);
 				else
 					makePacket(eSetLnbPower, SetLnbPower((BOOL)(pPh->m_pPacket->payload[0])));
+				break;
+			}
+
+			case eGetClientInfo:
+			{
+				union {
+					sockaddr_storage ss;
+					sockaddr_in si4;
+					sockaddr_in6 si6;
+				};
+				char addr[INET6_ADDRSTRLEN], buf[2048], info[4096], *p, *exinfo;
+				int port, len, num = 0;
+				size_t left, size;
+				socklen_t slen;
+				p = info;
+				p[0] = '\0';
+				left = size = sizeof(info);
+				exinfo = NULL;
+				std::list<cProxyServerEx *>::iterator it = g_InstanceList.begin();
+				while (it != g_InstanceList.end())
+				{
+					slen = sizeof(ss);
+					if (::getpeername((*it)->m_s, (sockaddr *)&ss, &slen) == 0)
+					{
+						if (ss.ss_family == AF_INET)
+						{
+							// IPv4
+							::inet_ntop(AF_INET, &(si4.sin_addr), addr, sizeof(addr));
+							port = ntohs(si4.sin_port);
+						}
+						else
+						{
+							// IPv6
+							::inet_ntop(AF_INET6, &(si6.sin6_addr), addr, sizeof(addr));
+							port = ntohs(si6.sin6_port);
+						}
+					}
+					else
+					{
+						::strcpy(addr, "unknown host...");
+						port = 0;
+					}
+					std::vector<stDriver> &vstDriver = DriversMap[(*it)->m_pDriversMapKey];
+					len = ::sprintf(buf, "%02d: [%s]:[%d] / [%s][%s] / space[%u] ch[%u]\n", num, addr, port, (*it)->m_pDriversMapKey, vstDriver[(*it)->m_iDriverNo].strBonDriver, (*it)->m_dwSpace, (*it)->m_dwChannel);
+					if ((size_t)len >= left)
+					{
+						left += size;
+						size *= 2;
+						if (exinfo != NULL)
+						{
+							char *bp = exinfo;
+							exinfo = new char[size];
+							::strcpy(exinfo, bp);
+							delete[] bp;
+						}
+						else
+						{
+							exinfo = new char[size];
+							::strcpy(exinfo, info);
+						}
+						p = exinfo + ::strlen(exinfo);
+					}
+					::strcpy(p, buf);
+					p += len;
+					left -= len;
+					num++;
+					++it;
+				}
+				if (exinfo != NULL)
+				{
+					size = (p - exinfo) + 1;
+					p = exinfo;
+				}
+				else
+				{
+					size = (p - info) + 1;
+					p = info;
+				}
+				cPacketHolder *ph = new cPacketHolder(eGetClientInfo, size);
+				::memcpy(ph->m_pPacket->payload, p, size);
+				m_fifoSend.Push(ph);
+				if (exinfo != NULL)
+					delete[] exinfo;
 				break;
 			}
 

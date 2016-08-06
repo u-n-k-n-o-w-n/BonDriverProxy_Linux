@@ -25,6 +25,8 @@ enum enumCommand {
 	eGetTotalDeviceNum,
 	eGetActiveDeviceNum,
 	eSetLnbPower,
+
+	eGetClientInfo,
 };
 
 struct stPacketHead {
