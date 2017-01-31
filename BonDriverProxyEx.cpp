@@ -51,27 +51,30 @@ static BOOL IsTagMatch(const char *line, const char *tag, char **value)
 	return TRUE;
 }
 
+static void DeleteSpace(char *dst, const char *src)
+{
+	while (*src != '\0')
+	{
+		if (*src != ' ')
+			*dst++ = *src;
+		src++;
+	} 
+	*dst = '\0';
+}
+
 static int Init(int ac, char *av[])
 {
-	if (ac < 3)
-		return -1;
-	::strncpy(g_Host, av[1], sizeof(g_Host) - 1);
-	g_Host[sizeof(g_Host) - 1] = '\0';
-	::strncpy(g_Port, av[2], sizeof(g_Port) - 1);
-	g_Port[sizeof(g_Port) - 1] = '\0';
-	if (ac > 3)
+	if (ac > 1)
 	{
-		g_OpenTunerRetDelay = ::atoi(av[3]);
-		if (ac > 4)
+		if (*av[1] == '-')
 		{
-			g_PacketFifoSize = ::atoi(av[4]);
-			if (ac > 5)
-				g_TsPacketBufSize = ::atoi(av[5]);
+			if ((*(av[1] + 1) == 'h') || (*(av[1] + 1) == 'H'))
+				return -1;
 		}
 	}
 
 	FILE *fp;
-	char *p, buf[1024];
+	char *p, buf[1024], buf2[1024];
 
 #ifdef LINUX
 	ssize_t len;
@@ -98,7 +101,8 @@ static int Init(int ac, char *av[])
 	int cntD, cntT = 0, num = 0;
 	char *str, *pos, *pp[MAX_DRIVERS], **ppDriver;
 	char tag[4];
-	while (::fgets(buf, sizeof(buf), fp) && (num < MAX_DRIVERS))
+	g_ppDriver[0] = NULL;
+	while (::fgets(buf, sizeof(buf), fp))
 	{
 		if (buf[0] == ';')
 			continue;
@@ -108,57 +112,87 @@ static int Init(int ac, char *av[])
 		if (p < buf)
 			continue;
 
+		// ;OPTION
+		DeleteSpace(buf2, buf);
+		if ((::strncmp(buf2, "ADDRESS=", 8) == 0) && (::strlen(buf2) > 8))
+		{
+			::strncpy(g_Host, buf2 + 8, sizeof(g_Host) - 1);
+			g_Host[sizeof(g_Host) - 1] = '\0';
+			continue;
+		}
+		if ((::strncmp(buf2, "PORT=", 5) == 0) && (::strlen(buf2) > 5))
+		{
+			::strncpy(g_Port, buf2 + 5, sizeof(g_Port) - 1);
+			g_Port[sizeof(g_Port) - 1] = '\0';
+			continue;
+		}
+		if ((::strncmp(buf2, "OPENTUNER_RETURN_DELAY=", 23) == 0) && (::strlen(buf2) > 23))
+		{
+			g_OpenTunerRetDelay = ::atoi(buf2 + 23);
+			continue;
+		}
+		if ((::strncmp(buf2, "PACKET_FIFO_SIZE=", 17) == 0) && (::strlen(buf2) > 17))
+		{
+			g_PacketFifoSize = ::atoi(buf2 + 17);
+			continue;
+		}
+		if ((::strncmp(buf2, "TSPACKET_BUFSIZE=", 17) == 0) && (::strlen(buf2) > 17))
+		{
+			g_TsPacketBufSize = ::atoi(buf2 + 17);
+			continue;
+		}
+
 		// ;BONDRIVER
 		// 00=PT-T;./BonDriver_LinuxPT-T0.so;./BonDriver_LinuxPT-T1.so
 		// 01=PT-S;./BonDriver_LinuxPT-S0.so;./BonDriver_LinuxPT-S1.so
-		tag[0] = (char)('0' + (num / 10));
-		tag[1] = (char)('0' + (num % 10));
-		tag[2] = '\0';
-		num++;
-		if (IsTagMatch(buf, tag, &p))
+		if (num < MAX_DRIVERS)
 		{
-			// format: GroupName;BonDriver1;BonDriver2;BonDriver3...
-			// e.g.  : PT-T;./BonDriver_LinuxPT-T0.so;./BonDriver_LinuxPT-T1.so
-			str = new char[::strlen(p) + 1];
-			::strcpy(str, p);
-			pos = pp[0] = str;
-			cntD = 1;
-			for (;;)
+			tag[0] = (char)('0' + (num / 10));
+			tag[1] = (char)('0' + (num % 10));
+			tag[2] = '\0';
+			num++;
+			if (IsTagMatch(buf, tag, &p))
 			{
-				p = ::strchr(pos, ';');
-				if (p)
+				// format: GroupName;BonDriver1;BonDriver2;BonDriver3...
+				// e.g.  : PT-T;./BonDriver_LinuxPT-T0.so;./BonDriver_LinuxPT-T1.so
+				str = new char[::strlen(p) + 1];
+				::strcpy(str, p);
+				pos = pp[0] = str;
+				cntD = 1;
+				for (;;)
 				{
-					*p = '\0';
-					pos = pp[cntD++] = p + 1;
-					if (cntD > (MAX_DRIVERS - 1))
+					p = ::strchr(pos, ';');
+					if (p)
+					{
+						*p = '\0';
+						pos = pp[cntD++] = p + 1;
+						if (cntD > (MAX_DRIVERS - 1))
+							break;
+					}
+					else
 						break;
 				}
-				else
-					break;
+				if (cntD == 1)
+				{
+					delete[] str;
+					continue;
+				}
+				ppDriver = g_ppDriver[cntT++] = new char *[cntD];
+				::memcpy(ppDriver, pp, sizeof(char *) * cntD);
+				std::vector<stDriver> vstDriver(cntD - 1);
+				for (int i = 1; i < cntD; i++)
+				{
+					vstDriver[i-1].strBonDriver = ppDriver[i];
+					vstDriver[i-1].hModule = NULL;
+					vstDriver[i-1].bUsed = FALSE;
+				}
+				DriversMap[ppDriver[0]] = vstDriver;
 			}
-			if (cntD == 1)
-			{
-				delete[] str;
-				continue;
-			}
-			ppDriver = g_ppDriver[cntT++] = new char *[cntD];
-			::memcpy(ppDriver, pp, sizeof(char *) * cntD);
-			std::vector<stDriver> vstDriver(cntD - 1);
-			for (int i = 1; i < cntD; i++)
-			{
-				vstDriver[i-1].strBonDriver = ppDriver[i];
-				vstDriver[i-1].hModule = NULL;
-				vstDriver[i-1].bUsed = FALSE;
-			}
-			DriversMap[ppDriver[0]] = vstDriver;
-		}
-		else
-		{
-			g_ppDriver[cntT] = NULL;
-			break;
 		}
 	}
 	::fclose(fp);
+	if (cntT < MAX_DRIVERS)
+		g_ppDriver[cntT] = NULL;
 
 #ifdef DEBUG
 	for (int i = 0; i < MAX_DRIVERS; i++)
@@ -171,6 +205,26 @@ static int Init(int ac, char *av[])
 			::fprintf(stderr, "  : %s\n", v[j].strBonDriver);
 	}
 #endif
+
+	switch (ac)
+	{
+		case 6:
+			g_TsPacketBufSize = ::atoi(av[5]);
+		case 5:
+			g_PacketFifoSize = ::atoi(av[4]);
+		case 4:
+			g_OpenTunerRetDelay = ::atoi(av[3]);
+		case 3:
+			::strncpy(g_Port, av[2], sizeof(g_Port) - 1);
+			g_Port[sizeof(g_Port) - 1] = '\0';
+		case 2:
+			::strncpy(g_Host, av[1], sizeof(g_Host) - 1);
+			g_Host[sizeof(g_Host) - 1] = '\0';
+		case 1:
+			break;
+		default:
+			return -1;
+	}
 
 	return 0;
 }

@@ -40,11 +40,11 @@ namespace BonDriverProxyEx {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static char g_Host[256];
-static char g_Port[8];
+static char g_Host[256] = "127.0.0.1";
+static char g_Port[8] = "1192";
 static size_t g_PacketFifoSize = 64;
 static DWORD g_TsPacketBufSize = (188 * 1024);
-static DWORD g_OpenTunerRetDelay;				// デフォルト値は0
+static DWORD g_OpenTunerRetDelay = 0;
 static BOOL g_DisableUnloadBonDriver = TRUE;	// bdplの標準はTRUEにする
 
 #define MAX_DRIVERS	64		// ドライバのグループ数とグループ内の数の両方
