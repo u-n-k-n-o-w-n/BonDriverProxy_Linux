@@ -146,7 +146,7 @@ static char *LoadSection(char *p, const char * const end, std::map<std::string, 
 					if (p < end)
 						*p++ = '\0';
 					// keyとvalueのペアを保存
-					section.insert(std::make_pair<std::string, std::string>(k, v));
+					section.insert(std::make_pair(k, v));
 				}
 			}
 		}
@@ -225,17 +225,17 @@ static int Init()
 			if (::strcmp(head, "#OPTION") == 0)
 			{
 				p = LoadSection(p, end, section);
-				config.insert(std::make_pair<std::string, std::map<std::string, std::string> >("#OPTION", section));
+				config.insert(std::make_pair("#OPTION", section));
 			}
 			else if (::strcmp(head, "#BONDRIVER") == 0)
 			{
 				p = LoadSection(p, end, section);
-				config.insert(std::make_pair<std::string, std::map<std::string, std::string> >("#BONDRIVER", section));
+				config.insert(std::make_pair("#BONDRIVER", section));
 			}
 			else if (::strncmp(head, "#SPACE", 6) == 0)
 			{
 				p = LoadSection(p, end, section);
-				config.insert(std::make_pair<std::string, std::map<std::string, std::string> >(head, section));
+				config.insert(std::make_pair(head, section));
 			}
 		}
 		else
@@ -828,7 +828,7 @@ const BOOL cBonDriverSplitter::SetChannel(const DWORD dwSpace, const DWORD dwCha
 							stDriverModule v;
 							v.hModule = hModule;
 							v.pCreateBonDriver = f;
-							g_DriverModuleMap.insert(std::make_pair<int, stDriverModule>(iBonNo, v));
+							g_DriverModuleMap.insert(std::make_pair(iBonNo, v));
 						}
 						pIBon = f();
 						if (pIBon)
