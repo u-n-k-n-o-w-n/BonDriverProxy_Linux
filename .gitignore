@@ -5,6 +5,7 @@ sample
 util/test
 util/udpsend
 util/splitter
+util/cinfo
 
 ### user config ###
 *.so.*
