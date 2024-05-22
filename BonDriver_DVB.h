@@ -33,6 +33,7 @@ namespace BonDriver_DVB {
 #define TS_BUFSIZE			(TS_PKTSIZE * 256)
 #define TS_FIFOSIZE			512
 #define WAIT_TIME			10	// デバイスからのread()でエラーが発生した場合の、次のread()までの間隔(ms)
+#define WAIT_TIME_BLOCKING	500	// デバイスからのread()がブロックする場合に待機する長さ(ms)。1000未満であること。
 #define TUNER_NAME			"BonDriver_DVB"
 
 ////////////////////////////////////////////////////////////////////////////////
