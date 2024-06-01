@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
@@ -30,10 +31,10 @@ namespace BonDriver_DVB {
 #define TTS_PKTSIZE			192
 #define TS_FEC_PKTSIZE		204
 #define TTS_FEC_PKTSIZE		208
-#define TS_BUFSIZE			(TS_PKTSIZE * 256)
+#define TS_BUFSIZE			(TS_PKTSIZE * 1024)
 #define TS_FIFOSIZE			512
-#define WAIT_TIME			10	// デバイスからのread()でエラーが発生した場合の、次のread()までの間隔(ms)
-#define WAIT_TIME_BLOCKING	500	// デバイスからのread()がブロックする場合に待機する長さ(ms)。1000未満であること。
+#define WAIT_TIME			10	// デバイスからのread()を試みた後、次回のread()までに無条件に待つ時間(ms)
+#define WAIT_TIME_POLL		500	// デバイスがread()可能か確認する際のタイムアウト時間(ms)
 #define TUNER_NAME			"BonDriver_DVB"
 
 ////////////////////////////////////////////////////////////////////////////////

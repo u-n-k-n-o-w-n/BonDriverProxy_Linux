@@ -1,6 +1,4 @@
 #include "BonDriver_DVB.h"
-#include <errno.h>
-#include <sys/select.h>
 
 namespace BonDriver_DVB {
 
@@ -753,6 +751,9 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 	timeval tv;
 	timespec ts;
 	int len, pos;
+	struct pollfd pfd;
+	pfd.fd = pDVB->m_dvrfd;
+	pfd.events = POLLIN;
 
 	if (g_UseServiceID)
 	{
@@ -844,25 +845,15 @@ void *cBonDriverDVB::TsReader(LPVOID pv)
 
 		// この不自然な位置で読み込みを行うのは、ロック/アンロックの回数を減らしつつ
 		// スレッド起動時に初回の読み込みを捨てないようにする為…
-		pBuf = pTsBuf + pos;
-		if ((len = ::read(pDVB->m_dvrfd, pBuf, TS_BUFSIZE - pos)) <= 0)
+		if((::poll(&pfd, 1, WAIT_TIME_POLL) > 0) && (pfd.revents & POLLIN))
 		{
-			BOOL bWaited = FALSE;
-			if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && pDVB->m_dvrfd < FD_SETSIZE)
+			pBuf = pTsBuf + pos;
+			if ((len = ::read(pDVB->m_dvrfd, pBuf, TS_BUFSIZE - pos)) > 0)
 			{
-				fd_set rfds;
-				FD_ZERO(&rfds);
-				FD_SET(pDVB->m_dvrfd, &rfds);
-				timeval tvWait;
-				tvWait.tv_sec = 0;
-				tvWait.tv_usec = WAIT_TIME_BLOCKING * 1000;
-				bWaited = ::select(pDVB->m_dvrfd + 1, &rfds, NULL, NULL, &tvWait) >= 0;
+				pos += len;
 			}
-			if (!bWaited)
-				::nanosleep(&ts, NULL);
-			continue;
+			::nanosleep(&ts, NULL);
 		}
-		pos += len;
 	}
 	delete[] pTsBuf;
 
